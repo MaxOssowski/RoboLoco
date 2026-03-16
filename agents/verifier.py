@@ -56,6 +56,23 @@ class VerifierAgent:
         state.log("tool_result", result.__dict__)
         return result
 
+    def _extract_json(self, text: str) -> dict:
+        text = text.strip()
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+        if "```json" in text:
+            start = text.find("```json") + len("```json")
+            end = text.find("```", start)
+            if end != -1:
+                return json.loads(text[start:end].strip())
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(text[start:end + 1])
+        raise ValueError("No valid JSON found in verifier response.")
+
     def _call_ollama(self, prompt: str) -> str:
         result = subprocess.run(
             ["ollama", "run", self.model, prompt],
@@ -100,7 +117,7 @@ Allowed statuses:
     def _semantic_verify(self, state: TaskState) -> AgentResult:
         try:
             raw = self._call_ollama(self._build_verification_prompt(state))
-            data = json.loads(raw)
+            data = self._extract_json(raw)
 
             status = data.get("status", "inconclusive")
             reasoning_summary = data.get("reasoning_summary", "Semantic verification completed.")
@@ -123,8 +140,19 @@ Allowed statuses:
                 status="inconclusive",
             )
 
+    def _current_attempt_tool_results(self, state: TaskState) -> list:
+        """Return only tool results logged after the most recent planner agent_result."""
+        last_planner_idx = -1
+        for i, e in enumerate(state.history):
+            if e["event_type"] == "agent_result" and e["payload"].get("agent") == "planner":
+                last_planner_idx = i
+        return [
+            e for e in state.history[last_planner_idx + 1:]
+            if e["event_type"] == "tool_result"
+        ]
+
     def act(self, state: TaskState) -> AgentResult:
-        last_tool_events = [e for e in state.history if e["event_type"] == "tool_result"]
+        last_tool_events = self._current_attempt_tool_results(state)
 
         if not last_tool_events:
             return AgentResult(
