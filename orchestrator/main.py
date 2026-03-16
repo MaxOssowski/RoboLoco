@@ -6,7 +6,7 @@ from agents.planner import PlannerAgent
 from agents.researcher import ResearcherAgent
 from agents.verifier import VerifierAgent
 from orchestrator.router import Router
-from orchestrator.state import TaskState, ToolResult
+from orchestrator.state import ModelConfig, TaskState, ToolResult
 from tools.filesystem import (
     FileExistsTool,
     FilesystemTool,
@@ -20,7 +20,15 @@ from tools.shell import ShellTool
 
 
 class Orchestrator:
-    def __init__(self, model: str = "llama3.1:8b", strict_verifier: bool = False) -> None:
+    def __init__(
+        self,
+        model: str = "llama3.1:8b",
+        models: ModelConfig | None = None,
+        strict_verifier: bool = False,
+    ) -> None:
+        if models is None:
+            models = ModelConfig(default=model)
+
         self.tool_registry = {
             FilesystemTool.name: FilesystemTool,
             ReadFileTool.name: ReadFileTool,
@@ -32,14 +40,14 @@ class Orchestrator:
             ShellTool.name: ShellTool,
         }
 
-        self.planner = PlannerAgent(model=model)
-        self.coder = CoderAgent(self.tool_registry)
+        self.planner = PlannerAgent(model=models.for_agent("planner"))
+        self.coder = CoderAgent(self.tool_registry, model=models.for_agent("coder"))
         self.verifier = VerifierAgent(
-            model=model,
+            model=models.for_agent("verifier"),
             tool_registry=self.tool_registry,
             strict_verifier=strict_verifier,
         )
-        self.researcher = ResearcherAgent(self.tool_registry)
+        self.researcher = ResearcherAgent(self.tool_registry, model=models.for_agent("researcher"))
         self.router = Router(self.coder, self.verifier, self.researcher)
 
     def run(self, goal: str, max_retries: int = 2) -> dict:
