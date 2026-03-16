@@ -10,7 +10,7 @@ class ModelConfig:
     default: str = "llama3.1:8b"
     planner: Optional[str] = None
     verifier: Optional[str] = None
-    coder: Optional[str] = None
+    coder: Optional[str] = "qwen3:8b"
     researcher: Optional[str] = None
 
     def for_agent(self, agent: str) -> str:
