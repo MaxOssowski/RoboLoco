@@ -11,7 +11,7 @@ from orchestrator.state import AgentResult, TaskState, ToolCall
 
 class PlannerAgent:
     name = "planner"
-    max_repair_attempts = 1
+    max_repair_attempts = 2
 
     def __init__(self, model: str = "llama3.1:8b") -> None:
         self.model = model
@@ -199,28 +199,6 @@ Return JSON in exactly this shape:
             data = self._get_plan_data(prompt)
             return self._validate_plan(data, tool_registry)
         except Exception as exc:
-            goal = state.goal.lower()
-
-            if "random_numbers.py" in goal and "5 random numbers" in goal:
-                code = """import random
-
-def print_random_numbers():
-    for _ in range(5):
-        print(random.randint(1, 100))
-
-if __name__ == '__main__':
-    print_random_numbers()
-"""
-                return AgentResult(
-                    agent=self.name,
-                    reasoning_summary=f"LLM planning failed, using deterministic fallback: {type(exc).__name__}",
-                    actions=[
-                        ToolCall(agent="coder", tool="write_file", args={"path": "random_numbers.py", "content": code}),
-                        ToolCall(agent="verifier", tool="run_shell", args={"command": "python3 random_numbers.py"}),
-                    ],
-                    status="ready",
-                )
-
             return AgentResult(
                 agent=self.name,
                 reasoning_summary=f"Planning failed: {type(exc).__name__}: {exc}",

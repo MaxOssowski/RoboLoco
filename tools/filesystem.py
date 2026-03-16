@@ -158,7 +158,7 @@ class ListFilesTool:
             prefix = "[DIR]" if item.is_dir() else "[FILE]"
             entries.append(f"{prefix} {item.relative_to(WORKSPACE)}")
 
-        output = "".join(entries) if entries else "<empty directory>"
+        output = "\n".join(entries) if entries else "<empty directory>"
         return ToolResult(ok=True, tool="list_files", output=output)
 
 
