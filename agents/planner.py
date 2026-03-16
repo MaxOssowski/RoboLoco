@@ -5,13 +5,14 @@ import json
 import subprocess
 from typing import Any, Dict, List
 
+from memory.summary_store import load_recent_summaries
 from orchestrator.policies import AGENT_PERMISSIONS, WORKSPACE, ValidationError
 from orchestrator.state import AgentResult, TaskState, ToolCall
 
 
 class PlannerAgent:
     name = "planner"
-    max_repair_attempts = 1
+    max_repair_attempts = 2
 
     def __init__(self, model: str = "llama3.1:8b") -> None:
         self.model = model
@@ -124,12 +125,32 @@ Malformed planner output:
 
             actions.append(ToolCall(agent=agent, tool=tool, args=args))
 
+        success_criteria = data.get("success_criteria", "")
+        if not isinstance(success_criteria, str):
+            success_criteria = ""
+
         return AgentResult(
             agent=self.name,
             reasoning_summary=reasoning_summary or "LLM produced a structured plan.",
             actions=actions,
             status=status,
+            success_criteria=success_criteria,
         )
+
+    def _build_memory_text(self) -> str:
+        recent = load_recent_summaries(limit=3)
+        if not recent:
+            return ""
+        lines = ["Prior completed tasks (use as context if relevant):"]
+        for s in recent:
+            files = ", ".join(s.get("files_touched", [])) or "none"
+            key_outputs = s.get("key_outputs", [])
+            out_snippet = key_outputs[0][:80].strip() if key_outputs else ""
+            line = f'- "{s["goal"]}" → {s["status"]} | files: {files}'
+            if out_snippet:
+                line += f' | output: {out_snippet}'
+            lines.append(line)
+        return "\n" + "\n".join(lines) + "\n"
 
     def _build_prompt(self, state: TaskState) -> str:
         repair_events = [e for e in state.history if e["event_type"] == "repair_context"]
@@ -148,6 +169,8 @@ Error output:
 
 Please repair the plan and avoid repeating the same mistake.
 """
+
+        memory_text = self._build_memory_text()
 
         return f"""
 You are the planner agent in a local multi-agent coding system.
@@ -173,7 +196,7 @@ Rules:
 - Keep reasoning_summary short.
 - status should usually be "ready".
 - Produce the smallest viable action list.
-
+{memory_text}
 Goal:
 {state.goal}
 {repair_text}
@@ -182,6 +205,7 @@ Return JSON in exactly this shape:
 {{
   "reasoning_summary": "...",
   "status": "ready",
+  "success_criteria": "Brief description of what success looks like",
   "actions": [
     {{"agent": "researcher", "tool": "search_in_files", "args": {{"pattern": "ToolCall", "path": "."}}}},
     {{"agent": "researcher", "tool": "summarize_file", "args": {{"path": "agents/planner.py"}}}},
@@ -199,28 +223,6 @@ Return JSON in exactly this shape:
             data = self._get_plan_data(prompt)
             return self._validate_plan(data, tool_registry)
         except Exception as exc:
-            goal = state.goal.lower()
-
-            if "random_numbers.py" in goal and "5 random numbers" in goal:
-                code = """import random
-
-def print_random_numbers():
-    for _ in range(5):
-        print(random.randint(1, 100))
-
-if __name__ == '__main__':
-    print_random_numbers()
-"""
-                return AgentResult(
-                    agent=self.name,
-                    reasoning_summary=f"LLM planning failed, using deterministic fallback: {type(exc).__name__}",
-                    actions=[
-                        ToolCall(agent="coder", tool="write_file", args={"path": "random_numbers.py", "content": code}),
-                        ToolCall(agent="verifier", tool="run_shell", args={"command": "python3 random_numbers.py"}),
-                    ],
-                    status="ready",
-                )
-
             return AgentResult(
                 agent=self.name,
                 reasoning_summary=f"Planning failed: {type(exc).__name__}: {exc}",

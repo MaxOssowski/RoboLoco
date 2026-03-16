@@ -1,12 +1,16 @@
 
 from __future__ import annotations
 
+import time
+from datetime import datetime, timezone
+
 from agents.coder import CoderAgent
 from agents.planner import PlannerAgent
 from agents.researcher import ResearcherAgent
 from agents.verifier import VerifierAgent
+from memory.summary_store import save_task_summary
 from orchestrator.router import Router
-from orchestrator.state import ModelConfig, TaskState, ToolResult
+from orchestrator.state import AgentResult, ModelConfig, TaskState, ToolResult
 from tools.filesystem import (
     FileExistsTool,
     FilesystemTool,
@@ -50,12 +54,80 @@ class Orchestrator:
         self.researcher = ResearcherAgent(self.tool_registry, model=models.for_agent("researcher"))
         self.router = Router(self.coder, self.verifier, self.researcher)
 
+    def _agent_models(self) -> dict:
+        return {
+            "planner": self.planner.model,
+            "coder": self.coder.model,
+            "verifier": self.verifier.model,
+            "researcher": self.researcher.model,
+        }
+
+    def _build_summary(
+        self,
+        goal: str,
+        result: dict,
+        all_tool_results: list[dict],
+        plan: AgentResult,
+        retry_count: int,
+        start_time: float,
+    ) -> dict:
+        files_touched: list[str] = []
+        tools_used: list[str] = []
+        key_outputs: list[str] = []
+        seen_tools: set[str] = set()
+
+        for r in all_tool_results:
+            tool = r.get("tool", "")
+            if tool not in seen_tools:
+                tools_used.append(tool)
+                seen_tools.add(tool)
+
+            if r.get("ok"):
+                output = r.get("output", "")
+                if tool == "write_file" and output.startswith("Wrote file:"):
+                    files_touched.append(output[len("Wrote file:"):].strip())
+                elif tool == "replace_in_file" and output.startswith("Replaced text in:"):
+                    files_touched.append(output[len("Replaced text in:"):].strip())
+                elif tool == "run_shell":
+                    key_outputs.append(output)
+
+        status = result.get("verification_status", "unknown")
+        verification_summary = result.get("verification_summary", "")
+        if status == "passed":
+            summary_text = f"Task completed successfully. {verification_summary}".strip()
+        else:
+            summary_text = f"Task did not complete. {verification_summary}".strip()
+
+        # Deduplicate files_touched while preserving order
+        seen: set[str] = set()
+        deduped_files: list[str] = []
+        for f in files_touched:
+            if f not in seen:
+                deduped_files.append(f)
+                seen.add(f)
+
+        return {
+            "goal": goal,
+            "status": status,
+            "summary": summary_text,
+            "success_criteria": plan.success_criteria,
+            "files_touched": deduped_files,
+            "tools_used": tools_used,
+            "key_outputs": key_outputs,
+            "retry_count": retry_count,
+            "agent_models": self._agent_models(),
+            "duration_seconds": round(time.monotonic() - start_time, 2),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
     def run(self, goal: str, max_retries: int = 2) -> dict:
+        start_time = time.monotonic()
         state = TaskState(goal=goal)
         state.log("task_started", {"goal": goal})
 
         attempt = 0
         all_tool_results: list[dict] = []
+        plan: AgentResult | None = None
 
         while attempt <= max_retries:
             plan = self.planner.act(state, self.tool_registry)
@@ -72,7 +144,7 @@ class Orchestrator:
 
             if plan.status != "ready":
                 verification = self.verifier.act(state)
-                return {
+                result = {
                     "goal": goal,
                     "planner_status": plan.status,
                     "planner_summary": plan.reasoning_summary,
@@ -81,22 +153,24 @@ class Orchestrator:
                     "verification_summary": verification.reasoning_summary,
                     "history": state.history,
                 }
+                save_task_summary(self._build_summary(goal, result, all_tool_results, plan, attempt, start_time))
+                return result
 
             had_failure = False
 
             for call in plan.actions:
                 executor = self.router.get_executor(call.agent)
                 if executor is None:
-                    result: ToolResult = self.router.unknown_executor_result(call.agent, call.tool)
-                    state.log("tool_result", result.__dict__)
-                    all_tool_results.append(result.__dict__)
+                    result_obj: ToolResult = self.router.unknown_executor_result(call.agent, call.tool)
+                    state.log("tool_result", result_obj.__dict__)
+                    all_tool_results.append(result_obj.__dict__)
                     had_failure = True
                     break
 
-                result = executor.execute(call, state)
-                all_tool_results.append(result.__dict__)
+                result_obj = executor.execute(call, state)
+                all_tool_results.append(result_obj.__dict__)
 
-                if not result.ok:
+                if not result_obj.ok:
                     had_failure = True
                     state.log(
                         "repair_context",
@@ -104,7 +178,7 @@ class Orchestrator:
                             "failed_tool": call.tool,
                             "failed_args": call.args,
                             "failed_agent": call.agent,
-                            "error_output": result.output,
+                            "error_output": result_obj.output,
                         },
                     )
                     break
@@ -122,7 +196,7 @@ class Orchestrator:
             )
 
             if not had_failure and verification.status == "passed":
-                return {
+                result = {
                     "goal": goal,
                     "planner_status": plan.status,
                     "planner_summary": plan.reasoning_summary,
@@ -131,6 +205,8 @@ class Orchestrator:
                     "verification_summary": verification.reasoning_summary,
                     "history": state.history,
                 }
+                save_task_summary(self._build_summary(goal, result, all_tool_results, plan, attempt, start_time))
+                return result
 
             state.log(
                 "repair_context",
@@ -143,7 +219,7 @@ class Orchestrator:
             )
             attempt += 1
 
-        return {
+        result = {
             "goal": goal,
             "planner_status": "failed",
             "planner_summary": "Max retries reached.",
@@ -152,3 +228,7 @@ class Orchestrator:
             "verification_summary": "Agent could not repair the task within retry limit.",
             "history": state.history,
         }
+        save_task_summary(
+            self._build_summary(goal, result, all_tool_results, plan or AgentResult(agent="planner", reasoning_summary=""), attempt, start_time)
+        )
+        return result

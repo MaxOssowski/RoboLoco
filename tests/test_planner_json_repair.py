@@ -43,13 +43,14 @@ class PlannerJsonRepairTests(unittest.TestCase):
         malformed = "not json at all"
         still_bad = "still not json"
 
-        with patch.object(self.planner, "_call_ollama", side_effect=[malformed, still_bad]) as mocked_call:
+        # 1 initial call + 2 repair attempts (max_repair_attempts = 2)
+        with patch.object(self.planner, "_call_ollama", side_effect=[malformed, still_bad, still_bad]) as mocked_call:
             plan = self.planner.act(
                 TaskState(goal="do something"),
                 self.orchestrator.tool_registry,
             )
 
-        self.assertEqual(mocked_call.call_count, 2)
+        self.assertEqual(mocked_call.call_count, 3)
         self.assertEqual(plan.status, "failed")
         self.assertIn("Planner JSON repair failed", plan.reasoning_summary)
 

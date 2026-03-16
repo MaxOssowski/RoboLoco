@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List
 
 from orchestrator.policies import resolve_workspace_path
@@ -20,6 +21,11 @@ class SearchInFilesTool:
         if not isinstance(pattern, str) or not pattern.strip():
             return ToolResult(ok=False, tool="search_in_files", output="pattern must be a non-empty string.")
 
+        try:
+            compiled = re.compile(pattern)
+        except re.error as exc:
+            return ToolResult(ok=False, tool="search_in_files", output=f"Invalid regex pattern: {exc}")
+
         root = resolve_workspace_path(path)
         if not root.exists():
             return ToolResult(ok=False, tool="search_in_files", output=f"Path not found: {root}")
@@ -37,13 +43,13 @@ class SearchInFilesTool:
                 continue
 
             for line_no, line in enumerate(text.splitlines(), start=1):
-                if pattern in line:
+                if compiled.search(line):
                     rel_path = file_path.relative_to(resolve_workspace_path("."))
                     matches.append(f"{rel_path}:{line_no}: {line.strip()}")
                     if len(matches) >= max_results:
-                        return ToolResult(ok=True, tool="search_in_files", output="".join(matches))
+                        return ToolResult(ok=True, tool="search_in_files", output="\n".join(matches))
 
         if not matches:
             return ToolResult(ok=True, tool="search_in_files", output="<no matches>")
 
-        return ToolResult(ok=True, tool="search_in_files", output="".join(matches))
+        return ToolResult(ok=True, tool="search_in_files", output="\n".join(matches))
