@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+
+from orchestrator.main import Orchestrator
+from orchestrator.state import ModelConfig
+
+# ── ANSI colours ────────────────────────────────────────────────────────────
+CYAN   = "\033[96m"
+GREEN  = "\033[92m"
+YELLOW = "\033[93m"
+RED    = "\033[91m"
+BOLD   = "\033[1m"
+DIM    = "\033[2m"
+RESET  = "\033[0m"
+
+# ── Banner ───────────────────────────────────────────────────────────────────
+BANNER = f"""{CYAN}{BOLD}
+ ██████╗  ██████╗ ██████╗  ██████╗     ██╗      ██████╗  ██████╗ ██████╗
+ ██╔══██╗██╔═══██╗██╔══██╗██╔═══██╗    ██║     ██╔═══██╗██╔════╝██╔═══██╗
+ ██████╔╝██║   ██║██████╔╝██║   ██║    ██║     ██║   ██║██║     ██║   ██║
+ ██╔══██╗██║   ██║██╔══██╗██║   ██║    ██║     ██║   ██║██║     ██║   ██║
+ ██║  ██║╚██████╔╝██████╔╝╚██████╔╝    ███████╗╚██████╔╝╚██████╗╚██████╔╝
+ ╚═╝  ╚═╝ ╚═════╝ ╚═════╝  ╚═════╝    ╚══════╝ ╚═════╝  ╚═════╝ ╚═════╝
+{RESET}"""
+
+TAGLINE = "  Modular Local AI Agent System  ·  Powered by Ollama\n"
+
+DIVIDER = f"  {DIM}{'─' * 62}{RESET}"
+
+HELP_TEXT = f"""
+{DIVIDER}
+  {BOLD}Commands{RESET}
+
+    {YELLOW}<task>{RESET}           Run agents on the given task
+    {YELLOW}run <task>{RESET}       Same as above (explicit form)
+    {YELLOW}help{RESET}             Show this message
+    {YELLOW}exit  /  quit{RESET}    Close the session
+
+  {BOLD}Examples{RESET}
+
+    {DIM}> Create a Python script that prints Fibonacci numbers{RESET}
+    {DIM}> run Write a function that checks if a string is a palindrome{RESET}
+{DIVIDER}
+"""
+
+
+def _model_line(models: ModelConfig) -> str:
+    agents = ("planner", "verifier", "coder", "researcher")
+    parts = [f"{a}: {YELLOW}{models.for_agent(a)}{RESET}{DIM}" for a in agents]
+    return f"  {DIM}" + "  ·  ".join(parts) + RESET
+
+
+def print_banner(models: ModelConfig) -> None:
+    print(BANNER)
+    print(f"{CYAN}{BOLD}{TAGLINE}{RESET}")
+    print(_model_line(models))
+    print()
+    print(f"  {DIM}Type a task to run, {YELLOW}help{RESET}{DIM} for commands, {RED}exit{RESET}{DIM} to quit.{RESET}")
+    print(f"\n{DIVIDER}\n")
+
+
+def run_task(orchestrator: Orchestrator, task: str, verbose: bool) -> None:
+    print(f"\n  {DIM}Starting agents…{RESET}\n")
+    result = orchestrator.run(task)
+
+    status = result.get("verification_status", "unknown")
+    color  = GREEN if status == "passed" else RED
+    summary = result.get("verification_summary", "")
+
+    print(DIVIDER)
+    print(f"  {color}{BOLD}● {status.upper()}{RESET}")
+    if summary:
+        print(f"  {DIM}{summary}{RESET}")
+
+    if verbose:
+        print()
+        print(json.dumps(result, indent=2))
+
+    print(f"{DIVIDER}\n")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="RoboLoco — interactive AI agent session")
+    parser.add_argument("--model",           default="llama3.1:8b", help="Default Ollama model for all agents")
+    parser.add_argument("--planner-model",   default=None,          help="Ollama model for the planner agent")
+    parser.add_argument("--verifier-model",  default=None,          help="Ollama model for the verifier agent")
+    parser.add_argument("--coder-model",     default=None,          help="Ollama model for the coder agent")
+    parser.add_argument("--researcher-model",default=None,          help="Ollama model for the researcher agent")
+    parser.add_argument("--strict-verifier", action="store_true",   help="Require semantic verification to pass")
+    parser.add_argument("--verbose", "-v",   action="store_true",   help="Print full JSON result after each task")
+    args = parser.parse_args()
+
+    models = ModelConfig(
+        default=args.model,
+        planner=args.planner_model,
+        verifier=args.verifier_model,
+        coder=args.coder_model,
+        researcher=args.researcher_model,
+    )
+
+    print_banner(models)
+
+    orchestrator = Orchestrator(models=models, strict_verifier=args.strict_verifier)
+
+    while True:
+        try:
+            raw = input(f"  {CYAN}❯{RESET} ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print(f"\n\n  {DIM}Session closed. Goodbye!{RESET}\n")
+            sys.exit(0)
+
+        if not raw:
+            continue
+
+        cmd = raw.lower()
+
+        if cmd in ("exit", "quit", "q"):
+            print(f"\n  {DIM}Session closed. Goodbye!{RESET}\n")
+            sys.exit(0)
+
+        if cmd == "help":
+            print(HELP_TEXT)
+            continue
+
+        task = raw[4:].strip() if cmd.startswith("run ") else raw
+
+        if not task:
+            print(f"  {RED}No task provided. Usage: run <task>{RESET}\n")
+            continue
+
+        run_task(orchestrator, task, verbose=args.verbose)
+
+
+if __name__ == "__main__":
+    main()

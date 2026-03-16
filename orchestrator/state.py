@@ -2,7 +2,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+
+
+@dataclass
+class ModelConfig:
+    default: str = "llama3.1:8b"
+    planner: Optional[str] = None
+    verifier: Optional[str] = None
+    coder: Optional[str] = "qwen3:8b"
+    researcher: Optional[str] = None
+
+    def for_agent(self, agent: str) -> str:
+        return getattr(self, agent, None) or self.default
 
 
 @dataclass
