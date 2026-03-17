@@ -202,9 +202,31 @@ Allowed statuses:
                 status="failed",
             )
 
+    def _written_files_exist(self, tool_events: list) -> tuple[bool, list[str]]:
+        """Check every file reported written by write_file actually exists on disk."""
+        missing = []
+        for e in tool_events:
+            p = e["payload"]
+            if p.get("tool") == "write_file" and p.get("ok"):
+                output = p.get("output", "")
+                if output.startswith("Wrote file:"):
+                    rel_path = output[len("Wrote file:"):].strip()
+                    if rel_path and not (WORKSPACE / rel_path).is_file():
+                        missing.append(rel_path)
+        return len(missing) == 0, missing
+
+    def _has_confirmed_file_exists(self, tool_events: list) -> bool:
+        """Return True if at least one file_exists call confirmed a file is present."""
+        return any(
+            e["payload"].get("tool") == "file_exists" and e["payload"].get("ok")
+            for e in tool_events
+        )
+
     def _build_verification_prompt(self, state: TaskState) -> str:
         recent_tools = [e["payload"] for e in state.history if e["event_type"] == "tool_result"][-6:]
         tool_text = json.dumps(recent_tools, indent=2)
+        success_criteria = self._get_success_criteria(state)
+        criteria_section = f"\nSuccess criteria:\n{success_criteria}\n" if success_criteria else ""
 
         return f"""
 You are the verifier agent in a local multi-agent coding system.
@@ -215,7 +237,7 @@ Do not assume success just because a command exited successfully.
 
 Goal:
 {state.goal}
-
+{criteria_section}
 Recent tool results:
 {tool_text}
 
@@ -278,12 +300,36 @@ Allowed statuses:
                 status="idle",
             )
 
+        # Surface the actual error so the planner can repair it precisely
         failed = [e for e in last_tool_events if not e["payload"].get("ok")]
         if failed:
+            first = failed[0]["payload"]
+            tool_name = first.get("tool", "unknown")
+            error_msg = first.get("output", "no error details")
             return AgentResult(
                 agent=self.name,
-                reasoning_summary="One or more tool executions failed. Check logs and repair the plan.",
+                reasoning_summary=f"Tool '{tool_name}' failed: {error_msg}",
                 status="failed",
+            )
+
+        # Deterministic pre-check: every file reported written must exist on disk
+        all_exist, missing = self._written_files_exist(last_tool_events)
+        if not all_exist:
+            return AgentResult(
+                agent=self.name,
+                reasoning_summary=(
+                    f"Written file(s) not found on disk: {', '.join(missing)}. "
+                    "The write_file tool reported success but the file is absent."
+                ),
+                status="failed",
+            )
+
+        # Fast path: file_exists confirmation is deterministic proof — skip LLM
+        if self._has_confirmed_file_exists(last_tool_events):
+            return AgentResult(
+                agent=self.name,
+                reasoning_summary="All tools succeeded and file existence confirmed on disk.",
+                status="passed",
             )
 
         if is_interactive_python_task(state.goal):
@@ -305,8 +351,31 @@ Allowed statuses:
                 status="failed",
             )
 
+        # Inconclusive but all tools passed and no files are missing:
+        # treat as passed only if there is at least some tool evidence of work done
+        has_shell_success = any(
+            e["payload"].get("tool") == "run_shell" and e["payload"].get("ok")
+            for e in last_tool_events
+        )
+        has_write_success = any(
+            e["payload"].get("tool") == "write_file" and e["payload"].get("ok")
+            for e in last_tool_events
+        )
+        if has_shell_success or has_write_success:
+            return AgentResult(
+                agent=self.name,
+                reasoning_summary=(
+                    "All tools succeeded with evidence of output; "
+                    "semantic verification was inconclusive."
+                ),
+                status="passed",
+            )
+
         return AgentResult(
             agent=self.name,
-            reasoning_summary="All executed tools succeeded, but semantic verification was inconclusive.",
-            status="passed",
+            reasoning_summary=(
+                "No clear evidence the goal was achieved. "
+                "Semantic verification was inconclusive and no output-producing tools ran."
+            ),
+            status="inconclusive",
         )
