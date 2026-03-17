@@ -34,6 +34,7 @@ class Orchestrator:
         model: str = "llama3.1:8b",
         models: ModelConfig | None = None,
         strict_verifier: bool = False,
+        planner_timeout: int = 60,
     ) -> None:
         if models is None:
             models = ModelConfig(default=model)
@@ -49,7 +50,7 @@ class Orchestrator:
             ShellTool.name: ShellTool,
         }
 
-        self.planner = PlannerAgent(model=models.for_agent("planner"))
+        self.planner = PlannerAgent(model=models.for_agent("planner"), timeout=planner_timeout)
         self.coder = CoderAgent(self.tool_registry, model=models.for_agent("coder"))
         self.verifier = VerifierAgent(
             model=models.for_agent("verifier"),

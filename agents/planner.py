@@ -14,8 +14,9 @@ class PlannerAgent:
     name = "planner"
     max_repair_attempts = 2
 
-    def __init__(self, model: str = "llama3.1:8b") -> None:
+    def __init__(self, model: str = "llama3.1:8b", timeout: int = 60) -> None:
         self.model = model
+        self.timeout = timeout
 
     def _call_ollama(self, prompt: str) -> str:
         result = subprocess.run(
@@ -23,7 +24,7 @@ class PlannerAgent:
             cwd=WORKSPACE,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=self.timeout,
         )
         if result.returncode != 0:
             raise RuntimeError((result.stderr or result.stdout or "Ollama call failed").strip())

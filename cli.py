@@ -168,6 +168,7 @@ def main() -> None:
     parser.add_argument("--verifier-model",  default=None,          help="Ollama model for the verifier agent")
     parser.add_argument("--coder-model",     default=None,          help="Ollama model for the coder agent")
     parser.add_argument("--researcher-model",default=None,          help="Ollama model for the researcher agent")
+    parser.add_argument("--planner-timeout",  type=int, default=60,  help="Seconds before the planner Ollama call times out (default: 60)")
     parser.add_argument("--strict-verifier", action="store_true",   help="Require semantic verification to pass")
     parser.add_argument("--verbose", "-v",   action="store_true",   help="Print full JSON result after each task")
     args = parser.parse_args()
@@ -182,7 +183,7 @@ def main() -> None:
 
     print_banner(models)
 
-    orchestrator = Orchestrator(models=models, strict_verifier=args.strict_verifier)
+    orchestrator = Orchestrator(models=models, strict_verifier=args.strict_verifier, planner_timeout=args.planner_timeout)
 
     while True:
         try:
