@@ -160,7 +160,7 @@ Malformed planner output:
 - Use replace_in_file when changing part of an existing file instead of rewriting the whole file.
 - If a task requires creating and running a Python file, first assign write_file to coder, then run_shell to verifier.
 - If the task produces an interactive or GUI Python app (e.g. pygame, tkinter, a game with a window), do NOT add a run_shell action to the plan. Static verification will be performed automatically by the verifier.
-- Use file_exists when the goal depends on confirming an artifact was created.
+- After every write_file action, always follow it with a file_exists action (verifier agent) to confirm the file was created. This is mandatory, not optional.
 - Use summarize_file when you need a concise understanding of a file instead of raw contents.
 - Use researcher for inspection tasks like listing files, searching in files, or reading existing files.
 - Never assign write_file or run_shell to researcher.
