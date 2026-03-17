@@ -4,9 +4,17 @@ from __future__ import annotations
 import argparse
 import itertools
 import json
+import os
 import sys
 import threading
 import time
+
+try:
+    import readline
+    _HISTORY_FILE = os.path.join(os.path.expanduser("~"), ".roboloco_history")
+    _READLINE_AVAILABLE = True
+except ImportError:
+    _READLINE_AVAILABLE = False
 
 from orchestrator.main import Orchestrator
 from orchestrator.state import ModelConfig
@@ -183,6 +191,11 @@ def main() -> None:
 
     print_banner(models)
 
+    if _READLINE_AVAILABLE:
+        readline.set_history_length(500)
+        if os.path.exists(_HISTORY_FILE):
+            readline.read_history_file(_HISTORY_FILE)
+
     orchestrator = Orchestrator(models=models, strict_verifier=args.strict_verifier, planner_timeout=args.planner_timeout)
 
     while True:
@@ -190,10 +203,15 @@ def main() -> None:
             raw = input(f"  {CYAN}❯{RESET} ").strip()
         except (KeyboardInterrupt, EOFError):
             print(f"\n\n  {DIM}Session closed. Goodbye!{RESET}\n")
+            if _READLINE_AVAILABLE:
+                readline.write_history_file(_HISTORY_FILE)
             sys.exit(0)
 
         if not raw:
             continue
+
+        if _READLINE_AVAILABLE:
+            readline.write_history_file(_HISTORY_FILE)
 
         cmd = raw.lower()
 
