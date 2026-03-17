@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import sys
+import threading
+import time
 
 from orchestrator.main import Orchestrator
 from orchestrator.state import ModelConfig
@@ -48,6 +51,59 @@ HELP_TEXT = f"""
 """
 
 
+_SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+_AGENT_ICONS = {
+    "planner":    f"{CYAN}planner{RESET}",
+    "coder":      f"{YELLOW}coder{RESET}",
+    "verifier":   f"{GREEN}verifier{RESET}",
+    "researcher": f"{CYAN}researcher{RESET}",
+}
+
+
+class StatusSpinner:
+    """Animated status line for the terminal.  No-ops when stdout is not a TTY."""
+
+    def __init__(self) -> None:
+        self._msg = ""
+        self._lock = threading.Lock()
+        self._running = False
+        self._thread: threading.Thread | None = None
+        self._is_tty = sys.stdout.isatty()
+
+    def start(self, initial: str = "") -> None:
+        if not self._is_tty:
+            return
+        self._msg = initial
+        self._running = True
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def update(self, msg: str) -> None:
+        with self._lock:
+            self._msg = msg
+
+    def stop(self) -> None:
+        if not self._is_tty:
+            return
+        self._running = False
+        if self._thread:
+            self._thread.join()
+        # clear the spinner line so subsequent print() calls land cleanly
+        sys.stdout.write(f"\r\033[K")
+        sys.stdout.flush()
+
+    def _loop(self) -> None:
+        for frame in itertools.cycle(_SPINNER_FRAMES):
+            if not self._running:
+                break
+            with self._lock:
+                msg = self._msg
+            sys.stdout.write(f"\r  {CYAN}{frame}{RESET}  {DIM}{msg}{RESET}\033[K")
+            sys.stdout.flush()
+            time.sleep(0.08)
+
+
 def _model_line(models: ModelConfig) -> str:
     agents = ("planner", "verifier", "coder", "researcher")
     parts = [f"{a}: {YELLOW}{models.for_agent(a)}{RESET}{DIM}" for a in agents]
@@ -64,11 +120,30 @@ def print_banner(models: ModelConfig) -> None:
 
 
 def run_task(orchestrator: Orchestrator, task: str, verbose: bool) -> None:
-    print(f"\n  {DIM}Starting agents…{RESET}\n")
-    result = orchestrator.run(task)
+    print()
+    spinner = StatusSpinner()
+    spinner.start("planner · thinking…")
 
-    status = result.get("verification_status", "unknown")
-    color  = GREEN if status == "passed" else RED
+    def on_event(kind: str, **kwargs) -> None:
+        if kind == "planning":
+            attempt = kwargs.get("attempt", 0)
+            if attempt == 0:
+                spinner.update("planner · thinking…")
+            else:
+                spinner.update(f"planner · retrying  (attempt {attempt + 1})…")
+        elif kind == "executing":
+            agent = kwargs.get("agent", "agent")
+            tool  = kwargs.get("tool", "tool")
+            icon  = _AGENT_ICONS.get(agent, agent)
+            spinner.update(f"{icon} · {tool}")
+        elif kind == "verifying":
+            spinner.update("verifier · checking result…")
+
+    result = orchestrator.run(task, on_event=on_event)
+    spinner.stop()
+
+    status  = result.get("verification_status", "unknown")
+    color   = GREEN if status == "passed" else RED
     summary = result.get("verification_summary", "")
 
     print(DIVIDER)
