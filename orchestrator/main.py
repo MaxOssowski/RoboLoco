@@ -125,7 +125,11 @@ class Orchestrator:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-    def run(self, goal: str, max_retries: int = 2) -> dict:
+    def run(self, goal: str, max_retries: int = 2, on_event=None) -> dict:
+        def emit(kind: str, **kwargs) -> None:
+            if on_event:
+                on_event(kind, **kwargs)
+
         start_time = time.monotonic()
         state = TaskState(goal=goal)
         state.log("task_started", {"goal": goal})
@@ -136,6 +140,7 @@ class Orchestrator:
         prior_fingerprints: list[FailedActionFingerprint] = []
 
         while attempt <= max_retries:
+            emit("planning", attempt=attempt)
             plan = self.planner.act(state, self.tool_registry)
             state.log(
                 "agent_result",
@@ -166,6 +171,7 @@ class Orchestrator:
             failed_fingerprint: FailedActionFingerprint | None = None
 
             for call in plan.actions:
+                emit("executing", agent=call.agent, tool=call.tool)
                 executor = self.router.get_executor(call.agent)
                 if executor is None:
                     result_obj: ToolResult = self.router.unknown_executor_result(call.agent, call.tool)
@@ -201,6 +207,7 @@ class Orchestrator:
                 attempt += 1
                 continue
 
+            emit("verifying", attempt=attempt)
             verification = self.verifier.act(state)
             state.log(
                 "agent_result",
