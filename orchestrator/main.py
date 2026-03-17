@@ -183,6 +183,10 @@ class Orchestrator:
                     )
                     break
 
+            if had_failure:
+                attempt += 1
+                continue
+
             verification = self.verifier.act(state)
             state.log(
                 "agent_result",
@@ -195,7 +199,7 @@ class Orchestrator:
                 },
             )
 
-            if not had_failure and verification.status == "passed":
+            if verification.status == "passed":
                 result = {
                     "goal": goal,
                     "planner_status": plan.status,
