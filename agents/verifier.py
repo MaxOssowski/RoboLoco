@@ -4,6 +4,11 @@ from __future__ import annotations
 import json
 import subprocess
 
+from agents.interactive import (
+    find_target_python_file,
+    is_interactive_python_task,
+    run_py_compile,
+)
 from orchestrator.policies import AGENT_PERMISSIONS, WORKSPACE
 from orchestrator.state import AgentResult, TaskState, ToolCall, ToolResult
 
@@ -84,6 +89,118 @@ class VerifierAgent:
         if result.returncode != 0:
             raise RuntimeError((result.stderr or result.stdout or "Ollama call failed").strip())
         return (result.stdout or "").strip()
+
+    def _get_success_criteria(self, state: TaskState) -> str:
+        """Extract the success_criteria from the most recent planner result in history."""
+        for event in reversed(state.history):
+            if (
+                event["event_type"] == "agent_result"
+                and event["payload"].get("agent") == "planner"
+            ):
+                return event["payload"].get("success_criteria", "")
+        return ""
+
+    def _build_source_verification_prompt(
+        self,
+        state: TaskState,
+        target_file: str,
+        file_content: str,
+        compile_ok: bool,
+        compile_output: str,
+        success_criteria: str,
+    ) -> str:
+        compile_section = "PASSED (no errors)" if compile_ok else f"FAILED:\n{compile_output}"
+        criteria_section = success_criteria if success_criteria else "(none specified)"
+        return f"""
+You are the verifier agent in a local multi-agent coding system.
+Return ONLY valid JSON. Do not add commentary before or after the JSON.
+
+Assess the Python source code below to determine whether the task goal is satisfied.
+Do NOT assume you can run the code. Base your verdict entirely on static source inspection.
+
+Goal:
+{state.goal}
+
+Success criteria:
+{criteria_section}
+
+File: {target_file}
+Compile check: {compile_section}
+
+Source code:
+{file_content}
+
+Return JSON in exactly this shape:
+{{
+  "status": "passed",
+  "reasoning_summary": "..."
+}}
+
+Allowed statuses:
+- passed   (file compiles and source satisfies the goal and criteria)
+- failed   (file is missing required elements or does not compile)
+- inconclusive
+""".strip()
+
+    def _interactive_verify(self, state: TaskState, target_file: str) -> AgentResult:
+        """Static verification path for interactive/GUI Python apps."""
+        file_path = WORKSPACE / target_file
+
+        if not file_path.is_file():
+            return AgentResult(
+                agent=self.name,
+                reasoning_summary=f"File not found: {target_file}. Coder must write it first.",
+                status="failed",
+            )
+
+        try:
+            file_content = file_path.read_text(encoding="utf-8")
+        except Exception as exc:
+            return AgentResult(
+                agent=self.name,
+                reasoning_summary=f"Could not read {target_file}: {exc}",
+                status="failed",
+            )
+
+        compile_ok, compile_output = run_py_compile(WORKSPACE, target_file)
+        success_criteria = self._get_success_criteria(state)
+
+        try:
+            prompt = self._build_source_verification_prompt(
+                state, target_file, file_content, compile_ok, compile_output, success_criteria
+            )
+            raw = self._call_ollama(prompt)
+            data = self._extract_json(raw)
+
+            status = data.get("status", "inconclusive")
+            reasoning = data.get("reasoning_summary", "Static verification completed.")
+
+            if status not in {"passed", "failed", "inconclusive"}:
+                status = "inconclusive"
+            if not isinstance(reasoning, str):
+                reasoning = "Static verification completed."
+
+            if not compile_ok and status != "failed":
+                status = "failed"
+
+            if not compile_ok:
+                reasoning = f"Compile error in {target_file}:\n{compile_output}\n\n{reasoning}"
+
+            return AgentResult(agent=self.name, reasoning_summary=reasoning, status=status)
+
+        except Exception:
+            # LLM unavailable — fall back to deterministic result
+            if compile_ok:
+                return AgentResult(
+                    agent=self.name,
+                    reasoning_summary=f"{target_file} compiled successfully.",
+                    status="passed",
+                )
+            return AgentResult(
+                agent=self.name,
+                reasoning_summary=f"Compile error in {target_file}:\n{compile_output}",
+                status="failed",
+            )
 
     def _build_verification_prompt(self, state: TaskState) -> str:
         recent_tools = [e["payload"] for e in state.history if e["event_type"] == "tool_result"][-6:]
@@ -168,6 +285,11 @@ Allowed statuses:
                 reasoning_summary="One or more tool executions failed. Check logs and repair the plan.",
                 status="failed",
             )
+
+        if is_interactive_python_task(state.goal):
+            target_file = find_target_python_file(state.goal)
+            if target_file:
+                return self._interactive_verify(state, target_file)
 
         semantic_result = self._semantic_verify(state)
         if semantic_result.status in {"passed", "failed"}:
