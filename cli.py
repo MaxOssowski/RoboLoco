@@ -142,9 +142,12 @@ def run_task(orchestrator: Orchestrator, task: str, verbose: bool) -> None:
     result = orchestrator.run(task, on_event=on_event)
     spinner.stop()
 
+    planner_status = result.get("planner_status", "")
     status  = result.get("verification_status", "unknown")
     color   = GREEN if status == "passed" else RED
     summary = result.get("verification_summary", "")
+    if planner_status not in ("ready", "") and status == "failed" and not summary:
+        summary = result.get("planner_summary", "")
 
     print(DIVIDER)
     print(f"  {color}{BOLD}● {status.upper()}{RESET}")

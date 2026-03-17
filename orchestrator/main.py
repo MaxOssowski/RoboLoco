@@ -154,14 +154,13 @@ class Orchestrator:
             )
 
             if plan.status != "ready":
-                verification = self.verifier.act(state)
                 result = {
                     "goal": goal,
                     "planner_status": plan.status,
                     "planner_summary": plan.reasoning_summary,
                     "tool_results": all_tool_results,
-                    "verification_status": verification.status,
-                    "verification_summary": verification.reasoning_summary,
+                    "verification_status": "failed",
+                    "verification_summary": plan.reasoning_summary,
                     "history": state.history,
                 }
                 save_task_summary(self._build_summary(goal, result, all_tool_results, plan, attempt, start_time))
