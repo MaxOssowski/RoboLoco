@@ -9,6 +9,11 @@ from agents.planner import PlannerAgent
 from agents.researcher import ResearcherAgent
 from agents.verifier import VerifierAgent
 from memory.summary_store import save_task_summary
+from orchestrator.repair import (
+    FailedActionFingerprint,
+    RepairDiagnostic,
+    fingerprint_failed_action,
+)
 from orchestrator.router import Router
 from orchestrator.state import AgentResult, ModelConfig, TaskState, ToolResult
 from tools.filesystem import (
@@ -128,6 +133,7 @@ class Orchestrator:
         attempt = 0
         all_tool_results: list[dict] = []
         plan: AgentResult | None = None
+        prior_fingerprints: list[FailedActionFingerprint] = []
 
         while attempt <= max_retries:
             plan = self.planner.act(state, self.tool_registry)
@@ -157,6 +163,7 @@ class Orchestrator:
                 return result
 
             had_failure = False
+            failed_fingerprint: FailedActionFingerprint | None = None
 
             for call in plan.actions:
                 executor = self.router.get_executor(call.agent)
@@ -165,6 +172,9 @@ class Orchestrator:
                     state.log("tool_result", result_obj.__dict__)
                     all_tool_results.append(result_obj.__dict__)
                     had_failure = True
+                    failed_fingerprint = fingerprint_failed_action(
+                        call.agent, call.tool, call.args, result_obj.output, attempt
+                    )
                     break
 
                 result_obj = executor.execute(call, state)
@@ -172,16 +182,24 @@ class Orchestrator:
 
                 if not result_obj.ok:
                     had_failure = True
-                    state.log(
-                        "repair_context",
-                        {
-                            "failed_tool": call.tool,
-                            "failed_args": call.args,
-                            "failed_agent": call.agent,
-                            "error_output": result_obj.output,
-                        },
+                    failed_fingerprint = fingerprint_failed_action(
+                        call.agent, call.tool, call.args, result_obj.output, attempt
                     )
                     break
+
+            if had_failure:
+                diagnostic = RepairDiagnostic(
+                    attempt=attempt,
+                    success_criteria=plan.success_criteria,
+                    verification_reasoning="Tool execution failed before verification.",
+                    failed_fingerprint=failed_fingerprint,
+                    prior_fingerprints=list(prior_fingerprints),
+                )
+                if failed_fingerprint is not None:
+                    prior_fingerprints.append(failed_fingerprint)
+                state.log("repair_diagnostic", diagnostic.as_dict())
+                attempt += 1
+                continue
 
             verification = self.verifier.act(state)
             state.log(
@@ -195,7 +213,7 @@ class Orchestrator:
                 },
             )
 
-            if not had_failure and verification.status == "passed":
+            if verification.status == "passed":
                 result = {
                     "goal": goal,
                     "planner_status": plan.status,
@@ -208,15 +226,14 @@ class Orchestrator:
                 save_task_summary(self._build_summary(goal, result, all_tool_results, plan, attempt, start_time))
                 return result
 
-            state.log(
-                "repair_context",
-                {
-                    "failed_tool": "semantic_verification",
-                    "failed_args": {},
-                    "failed_agent": "verifier",
-                    "error_output": verification.reasoning_summary,
-                },
+            diagnostic = RepairDiagnostic(
+                attempt=attempt,
+                success_criteria=plan.success_criteria,
+                verification_reasoning=verification.reasoning_summary,
+                failed_fingerprint=None,
+                prior_fingerprints=list(prior_fingerprints),
             )
+            state.log("repair_diagnostic", diagnostic.as_dict())
             attempt += 1
 
         result = {

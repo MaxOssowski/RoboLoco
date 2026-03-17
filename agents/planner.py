@@ -152,38 +152,7 @@ Malformed planner output:
             lines.append(line)
         return "\n" + "\n".join(lines) + "\n"
 
-    def _build_prompt(self, state: TaskState) -> str:
-        repair_events = [e for e in state.history if e["event_type"] == "repair_context"]
-        repair_text = ""
-
-        if repair_events:
-            last = repair_events[-1]["payload"]
-            repair_text = f"""
-
-Previous attempt failed.
-Failed tool: {last.get('failed_tool')}
-Failed agent: {last.get('failed_agent')}
-Failed args: {json.dumps(last.get('failed_args', {}))}
-Error output:
-{last.get('error_output')}
-
-Please repair the plan and avoid repeating the same mistake.
-"""
-
-        memory_text = self._build_memory_text()
-
-        return f"""
-You are the planner agent in a local multi-agent coding system.
-Return ONLY valid JSON. Do not add commentary before or after the JSON.
-
-You do not execute tools yourself. You only create an action plan.
-
-Available agents and permissions:
-- coder: write_file, read_file, replace_in_file
-- verifier: run_shell, read_file, file_exists
-- researcher: read_file, list_files, search_in_files, file_exists, summarize_file
-
-Rules:
+    _RULES = """\
 - All paths must be relative.
 - Prefer python3 over python.
 - Do not use shell chaining, pipes, redirects, or multiple commands.
@@ -195,29 +164,118 @@ Rules:
 - Never assign write_file or run_shell to researcher.
 - Keep reasoning_summary short.
 - status should usually be "ready".
-- Produce the smallest viable action list.
-{memory_text}
-Goal:
-{state.goal}
-{repair_text}
+- Produce the smallest viable action list."""
 
-Return JSON in exactly this shape:
-{{
+    _PERMISSIONS = """\
+- coder: write_file, read_file, replace_in_file
+- verifier: run_shell, read_file, file_exists
+- researcher: read_file, list_files, search_in_files, file_exists, summarize_file"""
+
+    _SCHEMA = """\
+{
   "reasoning_summary": "...",
   "status": "ready",
   "success_criteria": "Brief description of what success looks like",
   "actions": [
-    {{"agent": "researcher", "tool": "search_in_files", "args": {{"pattern": "ToolCall", "path": "."}}}},
-    {{"agent": "researcher", "tool": "summarize_file", "args": {{"path": "agents/planner.py"}}}},
-    {{"agent": "coder", "tool": "replace_in_file", "args": {{"path": "example.py", "old_text": "print('hi')", "new_text": "print('hello')"}}}},
-    {{"agent": "verifier", "tool": "run_shell", "args": {{"command": "python3 example.py"}}}},
-    {{"agent": "verifier", "tool": "file_exists", "args": {{"path": "example.py"}}}}
+    {"agent": "researcher", "tool": "search_in_files", "args": {"pattern": "ToolCall", "path": "."}},
+    {"agent": "researcher", "tool": "summarize_file", "args": {"path": "agents/planner.py"}},
+    {"agent": "coder", "tool": "replace_in_file", "args": {"path": "example.py", "old_text": "print('hi')", "new_text": "print('hello')"}},
+    {"agent": "verifier", "tool": "run_shell", "args": {"command": "python3 example.py"}},
+    {"agent": "verifier", "tool": "file_exists", "args": {"path": "example.py"}}
   ]
-}}
+}"""
+
+    def _build_prompt(self, state: TaskState) -> str:
+        memory_text = self._build_memory_text()
+
+        return f"""
+You are the planner agent in a local multi-agent coding system.
+Return ONLY valid JSON. Do not add commentary before or after the JSON.
+
+You do not execute tools yourself. You only create an action plan.
+
+Available agents and permissions:
+{self._PERMISSIONS}
+
+Rules:
+{self._RULES}
+{memory_text}
+Goal:
+{state.goal}
+
+Return JSON in exactly this shape:
+{self._SCHEMA}
+""".strip()
+
+    def _build_repair_prompt(self, state: TaskState, diagnostic: dict) -> str:
+        attempt = diagnostic["attempt"]
+        success_criteria = diagnostic.get("success_criteria", "")
+        verification_reasoning = diagnostic.get("verification_reasoning", "")
+        failed_fp = diagnostic.get("failed_fingerprint")
+        is_repeated = diagnostic.get("is_repeated_failure", False)
+        prior_signatures = diagnostic.get("prior_signatures", [])
+
+        if failed_fp:
+            repeated_warning = (
+                "\n\nWARNING: This fingerprint has already failed in a prior attempt. "
+                "You MUST use a fundamentally different approach — "
+                "do not retry the same tool with a similar argument shape."
+            ) if is_repeated else ""
+            failure_section = (
+                f"--- Tool failure on attempt {attempt} ---\n"
+                f"  Fingerprint : {failed_fp['signature']}\n"
+                f"  Agent       : {failed_fp['agent']}\n"
+                f"  Tool        : {failed_fp['tool']}\n"
+                f"  Args        : {json.dumps(failed_fp['arg_snapshot'])}\n"
+                f"  Error       : {failed_fp['error_output']}"
+                f"{repeated_warning}"
+            )
+        else:
+            failure_section = (
+                f"--- Semantic failure on attempt {attempt} ---\n"
+                "All tool calls succeeded but the verifier determined the goal was NOT achieved.\n"
+                f"Verifier reasoning: {verification_reasoning}"
+            )
+
+        prior_section = ""
+        if prior_signatures:
+            lines = "\n".join(f"  - {sig}" for sig in prior_signatures)
+            prior_section = (
+                f"\nPreviously failed action fingerprints (do not repeat these patterns):\n{lines}\n"
+            )
+
+        memory_text = self._build_memory_text()
+
+        return f"""
+You are the planner agent in repair mode for a local multi-agent coding system.
+Return ONLY valid JSON. Do not add commentary before or after the JSON.
+
+A previous action plan failed. Produce a corrected plan that directly addresses the failure below.
+{prior_section}
+Goal:
+{state.goal}
+
+Unmet success criteria:
+{success_criteria if success_criteria else "(none specified)"}
+
+{failure_section}
+
+Available agents and permissions:
+{self._PERMISSIONS}
+
+Rules:
+{self._RULES}
+{memory_text}
+Return JSON in exactly this shape:
+{self._SCHEMA}
 """.strip()
 
     def act(self, state: TaskState, tool_registry: Dict[str, object]) -> AgentResult:
-        prompt = self._build_prompt(state)
+        repair_events = [e for e in state.history if e["event_type"] == "repair_diagnostic"]
+        if repair_events:
+            prompt = self._build_repair_prompt(state, repair_events[-1]["payload"])
+        else:
+            prompt = self._build_prompt(state)
 
         try:
             data = self._get_plan_data(prompt)
