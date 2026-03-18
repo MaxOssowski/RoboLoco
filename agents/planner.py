@@ -171,7 +171,7 @@ class PlannerAgent:
 - Prefer python3 over python.
 - Do not use shell chaining, pipes, redirects, or multiple commands.
 - To create a new code file, use code_file (coder). Provide a clear natural-language specification — do NOT write the code yourself.
-- To modify a specific section of an existing file, use patch_file (coder). Provide old_lines (the exact text to replace, copied verbatim from the file) and new_lines (the replacement). This is the primary tool for surgical edits to existing files.
+- To modify a specific section of an existing file, use patch_file (coder). Provide old_lines (the exact text to replace, copied verbatim from the file) and new_lines (the replacement). This is the primary tool for surgical edits to existing files. old_lines must not be empty. Do NOT write code in new_lines — new_lines should be a short literal replacement, not a full implementation. Do NOT use patch_file on a file that has not been created yet in the same plan.
 - To perform a larger modification of an existing code file that requires rewriting most of it, use modify_file (coder). Describe the required change as a specification — do NOT write the new code yourself.
 - Use replace_in_file (coder) only as a last resort for tiny literal substitutions when patch_file is not appropriate.
 - Use write_file (coder) only for creating new non-code content such as plain-text files or config files.

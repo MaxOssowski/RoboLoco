@@ -26,9 +26,10 @@ _CODER_NATIVE_TOOLS = frozenset({"code_file", "modify_file"})
 class CoderAgent:
     name = "coder"
 
-    def __init__(self, tool_registry: dict[str, object], model: str = "qwen3:8b") -> None:
+    def __init__(self, tool_registry: dict[str, object], model: str = "qwen3:8b", timeout: int = 120) -> None:
         self.tool_registry = tool_registry
         self.model = model
+        self.timeout = timeout
 
     def can_execute(self, tool_name: str) -> bool:
         return tool_name in AGENT_PERMISSIONS[self.name]
@@ -41,7 +42,7 @@ class CoderAgent:
             cwd=WORKSPACE,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=self.timeout,
         )
         if result.returncode != 0:
             raise RuntimeError((result.stderr or result.stdout or "Ollama call failed").strip())

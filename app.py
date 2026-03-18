@@ -25,6 +25,12 @@ def main() -> None:
         default=60,
         help="Planner LLM timeout in seconds (default: 60)",
     )
+    parser.add_argument(
+        "--coder-timeout",
+        type=int,
+        default=120,
+        help="Coder LLM timeout in seconds (default: 120)",
+    )
     args = parser.parse_args()
 
     models = ModelConfig(
@@ -34,7 +40,7 @@ def main() -> None:
         coder=args.coder_model,
         researcher=args.researcher_model,
     )
-    orchestrator = Orchestrator(models=models, strict_verifier=args.strict_verifier, planner_timeout=args.planner_timeout)
+    orchestrator = Orchestrator(models=models, strict_verifier=args.strict_verifier, planner_timeout=args.planner_timeout, coder_timeout=args.coder_timeout)
     result = orchestrator.run(args.task)
     print(json.dumps(result, indent=2))
 
