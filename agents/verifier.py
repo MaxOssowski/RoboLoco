@@ -11,6 +11,7 @@ from agents.interactive import (
 )
 from orchestrator.policies import AGENT_PERMISSIONS, WORKSPACE
 from orchestrator.state import AgentResult, TaskState, ToolCall, ToolResult
+from prompts.loader import render_prompt
 
 
 class VerifierAgent:
@@ -114,41 +115,20 @@ class VerifierAgent:
         compile_output: str,
         success_criteria: list[str],
     ) -> str:
+        # Template: prompts/verifier_source_static.md
         compile_section = "PASSED (no errors)" if compile_ok else f"FAILED:\n{compile_output}"
         if success_criteria:
             criteria_section = "\n".join(f"  {i + 1}. {c}" for i, c in enumerate(success_criteria))
         else:
             criteria_section = "(none specified)"
-        return f"""
-You are the verifier agent in a local multi-agent coding system.
-Return ONLY valid JSON. Do not add commentary before or after the JSON.
-
-Assess the Python source code below to determine whether the task goal is satisfied.
-Do NOT assume you can run the code. Base your verdict entirely on static source inspection.
-
-Goal:
-{state.goal}
-
-Success criteria:
-{criteria_section}
-
-File: {target_file}
-Compile check: {compile_section}
-
-Source code:
-{file_content}
-
-Return JSON in exactly this shape:
-{{
-  "status": "passed",
-  "reasoning_summary": "..."
-}}
-
-Allowed statuses:
-- passed   (file compiles and source satisfies the goal and criteria)
-- failed   (file is missing required elements or does not compile)
-- inconclusive
-""".strip()
+        return render_prompt(
+            "verifier_source_static.md",
+            goal=state.goal,
+            criteria_section=criteria_section,
+            target_file=target_file,
+            compile_section=compile_section,
+            file_content=file_content,
+        )
 
     def _interactive_verify(self, state: TaskState, target_file: str) -> AgentResult:
         """Static verification path for interactive/GUI Python apps."""
@@ -239,6 +219,7 @@ Allowed statuses:
         )
 
     def _build_verification_prompt(self, state: TaskState) -> str:
+        # Template: prompts/verifier_semantic.md
         recent_tools = [e["payload"] for e in state.history if e["event_type"] == "tool_result"][-6:]
         tool_text = json.dumps(recent_tools, indent=2)
         success_criteria = self._get_success_criteria(state)
@@ -247,31 +228,12 @@ Allowed statuses:
             criteria_section = f"\nSuccess criteria (evaluate each):\n{numbered}\n"
         else:
             criteria_section = ""
-
-        return f"""
-You are the verifier agent in a local multi-agent coding system.
-Return ONLY valid JSON. Do not add commentary before or after the JSON.
-
-Evaluate whether the task goal was actually achieved based on the recent tool results.
-Do not assume success just because a command exited successfully.
-
-Goal:
-{state.goal}
-{criteria_section}
-Recent tool results:
-{tool_text}
-
-Return JSON in exactly this shape:
-{{
-  "status": "passed",
-  "reasoning_summary": "Goal achieved because ..."
-}}
-
-Allowed statuses:
-- passed
-- failed
-- inconclusive
-""".strip()
+        return render_prompt(
+            "verifier_semantic.md",
+            goal=state.goal,
+            criteria_section=criteria_section,
+            tool_text=tool_text,
+        )
 
     def _semantic_verify(self, state: TaskState) -> AgentResult:
         try:

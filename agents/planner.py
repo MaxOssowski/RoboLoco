@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 from memory.summary_store import load_recent_summaries
 from orchestrator.policies import AGENT_PERMISSIONS, WORKSPACE, ValidationError
 from orchestrator.state import AgentResult, TaskState, ToolCall
+from prompts.loader import render_prompt
 
 
 class PlannerAgent:
@@ -54,17 +55,8 @@ class PlannerAgent:
         raise ValidationError("Planner did not return valid JSON.")
 
     def _build_json_repair_prompt(self, malformed_output: str) -> str:
-        return f"""
-You are repairing malformed planner output for a local multi-agent coding system.
-Return ONLY valid JSON. Do not add commentary before or after the JSON.
-
-The previous planner output was malformed or wrapped in extra text.
-Re-emit the same plan as valid JSON only.
-Do not invent new actions unless needed to preserve the original intent.
-
-Malformed planner output:
-{malformed_output}
-""".strip()
+        # Template: prompts/planner_json_repair.md
+        return render_prompt("planner_json_repair.md", malformed_output=malformed_output)
 
     def _get_plan_data(self, prompt: str) -> Dict[str, Any]:
         raw = self._call_ollama(prompt)
@@ -211,28 +203,18 @@ Malformed planner output:
 }"""
 
     def _build_prompt(self, state: TaskState) -> str:
-        memory_text = self._build_memory_text()
-
-        return f"""
-You are the planner agent in a local multi-agent coding system.
-Return ONLY valid JSON. Do not add commentary before or after the JSON.
-
-You do not execute tools yourself. You only create an action plan.
-
-Available agents and permissions:
-{self._PERMISSIONS}
-
-Rules:
-{self._RULES}
-{memory_text}
-Goal:
-{state.goal}
-
-Return JSON in exactly this shape:
-{self._SCHEMA}
-""".strip()
+        # Template: prompts/planner_plan.md
+        return render_prompt(
+            "planner_plan.md",
+            permissions=self._PERMISSIONS,
+            rules=self._RULES,
+            memory_section=self._build_memory_text(),
+            goal=state.goal,
+            schema=self._SCHEMA,
+        )
 
     def _build_repair_prompt(self, state: TaskState, diagnostic: dict) -> str:
+        # Template: prompts/planner_repair.md
         attempt = diagnostic["attempt"]
         sc_raw = diagnostic.get("success_criteria", [])
         # Handle both list (new) and string (legacy) shapes gracefully
@@ -276,31 +258,17 @@ Return JSON in exactly this shape:
                 f"\nPreviously failed action fingerprints (do not repeat these patterns):\n{lines}\n"
             )
 
-        memory_text = self._build_memory_text()
-
-        return f"""
-You are the planner agent in repair mode for a local multi-agent coding system.
-Return ONLY valid JSON. Do not add commentary before or after the JSON.
-
-A previous action plan failed. Produce a corrected plan that directly addresses the failure below.
-{prior_section}
-Goal:
-{state.goal}
-
-Unmet success criteria:
-{criteria_text}
-
-{failure_section}
-
-Available agents and permissions:
-{self._PERMISSIONS}
-
-Rules:
-{self._RULES}
-{memory_text}
-Return JSON in exactly this shape:
-{self._SCHEMA}
-""".strip()
+        return render_prompt(
+            "planner_repair.md",
+            prior_section=prior_section,
+            goal=state.goal,
+            criteria_text=criteria_text,
+            failure_section=failure_section,
+            permissions=self._PERMISSIONS,
+            rules=self._RULES,
+            memory_section=self._build_memory_text(),
+            schema=self._SCHEMA,
+        )
 
     def act(self, state: TaskState, tool_registry: Dict[str, object]) -> AgentResult:
         repair_events = [e for e in state.history if e["event_type"] == "repair_diagnostic"]
