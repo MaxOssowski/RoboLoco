@@ -123,6 +123,16 @@ class PlannerAgent:
             if not isinstance(args, dict):
                 raise ValidationError("Action args must be an object.")
 
+            # Catch guaranteed-to-fail patch_file shapes before execution.
+            if tool == "patch_file":
+                old_lines = args.get("old_lines", "")
+                if not isinstance(old_lines, str) or not old_lines.strip():
+                    raise ValidationError(
+                        "patch_file action has empty old_lines — this will always fail at runtime. "
+                        "Use code_file to create files and read_file to obtain the exact text "
+                        "before attempting a patch."
+                    )
+
             actions.append(ToolCall(agent=agent, tool=tool, args=args))
 
         # success_criteria is required and must be a non-empty list of non-empty strings
