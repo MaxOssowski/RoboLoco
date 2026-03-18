@@ -37,6 +37,7 @@ class Orchestrator:
         models: ModelConfig | None = None,
         strict_verifier: bool = False,
         planner_timeout: int = 60,
+        coder_timeout: int = 120,
     ) -> None:
         if models is None:
             models = ModelConfig(default=model)
@@ -58,7 +59,7 @@ class Orchestrator:
         }
 
         self.planner = PlannerAgent(model=models.for_agent("planner"), timeout=planner_timeout)
-        self.coder = CoderAgent(self.tool_registry, model=models.for_agent("coder"))
+        self.coder = CoderAgent(self.tool_registry, model=models.for_agent("coder"), timeout=coder_timeout)
         self.verifier = VerifierAgent(
             model=models.for_agent("verifier"),
             tool_registry=self.tool_registry,

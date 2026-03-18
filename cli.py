@@ -72,6 +72,7 @@ class Settings:
     verifier_model: str | None = None
     researcher_model: str | None = None
     planner_timeout: int = 60
+    coder_timeout: int = 120
     strict_verifier: bool = False
     verbose: bool = False
 
@@ -89,6 +90,7 @@ class Settings:
             models=self.to_model_config(),
             strict_verifier=self.strict_verifier,
             planner_timeout=self.planner_timeout,
+            coder_timeout=self.coder_timeout,
         )
 
 
@@ -120,6 +122,7 @@ _OPT_ROWS: list[tuple[str, str]] = [
     ("verifier-model",   "Verifier agent model"),
     ("researcher-model", "Researcher agent model"),
     ("planner-timeout",  "Planner LLM timeout (seconds)"),
+    ("coder-timeout",    "Coder LLM timeout (seconds)"),
     ("strict-verifier",  "Require verifier to pass"),
     ("verbose",          "Print full JSON result"),
 ]
@@ -142,6 +145,8 @@ def _opt_display(key: str, s: Settings) -> str:
         return f"{YELLOW}{override}{RESET}" if override else f"{DIM}(default → {eff}){RESET}"
     if key == "planner-timeout":
         return f"{YELLOW}{s.planner_timeout}{RESET} s"
+    if key == "coder-timeout":
+        return f"{YELLOW}{s.coder_timeout}{RESET} s"
     if key == "strict-verifier":
         return f"{GREEN}on{RESET}" if s.strict_verifier else f"{DIM}off{RESET}"
     if key == "verbose":
@@ -259,6 +264,27 @@ def options_menu(s: Settings) -> bool:
             print(f"  {RED}Must be an integer.{RESET}\n")
             return False
         print(f"  {GREEN}✓{RESET}  planner-timeout set to {YELLOW}{s.planner_timeout}{RESET} s.\n")
+        return True
+
+    # ── coder-timeout ─────────────────────────────────────────────────────────
+    if key == "coder-timeout":
+        try:
+            new_val = input(
+                f"  coder-timeout [{DIM}current: {s.coder_timeout} s{RESET}]"
+                f"  New value (s): "
+            ).strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return False
+        print()
+        if not new_val:
+            return False
+        try:
+            s.coder_timeout = int(new_val)
+        except ValueError:
+            print(f"  {RED}Must be an integer.{RESET}\n")
+            return False
+        print(f"  {GREEN}✓{RESET}  coder-timeout set to {YELLOW}{s.coder_timeout}{RESET} s.\n")
         return True
 
     # ── Boolean toggle ────────────────────────────────────────────────────────
@@ -391,6 +417,7 @@ def main() -> None:
     parser.add_argument("--coder-model",      default=None,          help="Ollama model for the coder agent")
     parser.add_argument("--researcher-model", default=None,          help="Ollama model for the researcher agent")
     parser.add_argument("--planner-timeout",  type=int, default=60,  help="Seconds before the planner Ollama call times out (default: 60)")
+    parser.add_argument("--coder-timeout",    type=int, default=120, help="Seconds before the coder Ollama call times out (default: 120)")
     parser.add_argument("--strict-verifier",  action="store_true",   help="Require semantic verification to pass")
     parser.add_argument("--verbose", "-v",    action="store_true",   help="Print full JSON result after each task")
     args = parser.parse_args()
@@ -402,6 +429,7 @@ def main() -> None:
         verifier_model=args.verifier_model,
         researcher_model=args.researcher_model,
         planner_timeout=args.planner_timeout,
+        coder_timeout=args.coder_timeout,
         strict_verifier=args.strict_verifier,
         verbose=args.verbose,
     )
