@@ -20,11 +20,12 @@ class FilesystemTool:
         file_path = resolve_workspace_path(path)
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
+        rel = file_path.relative_to(WORKSPACE)
 
         return ToolResult(
             ok=True,
             tool="write_file",
-            output=f"Wrote file: {file_path}",
+            output=f"Wrote file: {rel}",
         )
 
 
@@ -40,7 +41,7 @@ class ReadFileTool:
             return ToolResult(
                 ok=False,
                 tool="read_file",
-                output=f"File not found: {file_path}",
+                output=f"File not found: {file_path.relative_to(WORKSPACE)}",
             )
 
         content = file_path.read_text(encoding="utf-8")
@@ -54,14 +55,15 @@ class FileExistsTool:
     def run(args: Dict[str, Any]) -> ToolResult:
         path = args.get("path")
         file_path = resolve_workspace_path(path)
+        rel = file_path.relative_to(WORKSPACE)
 
         if not file_path.exists():
-            return ToolResult(ok=False, tool="file_exists", output=f"File not found: {file_path}")
+            return ToolResult(ok=False, tool="file_exists", output=f"File not found: {rel}")
 
         if not file_path.is_file():
-            return ToolResult(ok=False, tool="file_exists", output=f"Path is not a file: {file_path}")
+            return ToolResult(ok=False, tool="file_exists", output=f"Path is not a file: {rel}")
 
-        return ToolResult(ok=True, tool="file_exists", output=f"File exists: {file_path}")
+        return ToolResult(ok=True, tool="file_exists", output=f"File exists: {rel}")
 
 
 class SummarizeFileTool:
@@ -110,11 +112,12 @@ class SummarizeFileTool:
             raise ValidationError("preview_lines must be an integer between 0 and 20.")
 
         file_path = resolve_workspace_path(path)
+        rel = file_path.relative_to(WORKSPACE)
         if not file_path.exists():
-            return ToolResult(ok=False, tool="summarize_file", output=f"File not found: {file_path}")
+            return ToolResult(ok=False, tool="summarize_file", output=f"File not found: {rel}")
 
         if not file_path.is_file():
-            return ToolResult(ok=False, tool="summarize_file", output=f"Path is not a file: {file_path}")
+            return ToolResult(ok=False, tool="summarize_file", output=f"Path is not a file: {rel}")
 
         text = file_path.read_text(encoding="utf-8", errors="replace")
         non_empty_lines = [line for line in text.splitlines() if line.strip()]
@@ -146,12 +149,13 @@ class ListFilesTool:
     def run(args: Dict[str, Any]) -> ToolResult:
         path = args.get("path", ".")
         dir_path = resolve_workspace_path(path)
+        rel = dir_path.relative_to(WORKSPACE)
 
         if not dir_path.exists():
-            return ToolResult(ok=False, tool="list_files", output=f"Path not found: {dir_path}")
+            return ToolResult(ok=False, tool="list_files", output=f"Path not found: {rel}")
 
         if not dir_path.is_dir():
-            return ToolResult(ok=False, tool="list_files", output=f"Path is not a directory: {dir_path}")
+            return ToolResult(ok=False, tool="list_files", output=f"Path is not a directory: {rel}")
 
         entries = []
         for item in sorted(dir_path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
@@ -175,8 +179,9 @@ class ReplaceInFileTool:
             raise ValidationError("old_text and new_text must be strings.")
 
         file_path = resolve_workspace_path(path)
+        rel = file_path.relative_to(WORKSPACE)
         if not file_path.exists():
-            return ToolResult(ok=False, tool="replace_in_file", output=f"File not found: {file_path}")
+            return ToolResult(ok=False, tool="replace_in_file", output=f"File not found: {rel}")
 
         content = file_path.read_text(encoding="utf-8")
         if old_text not in content:
@@ -184,7 +189,7 @@ class ReplaceInFileTool:
 
         updated = content.replace(old_text, new_text, 1)
         file_path.write_text(updated, encoding="utf-8")
-        return ToolResult(ok=True, tool="replace_in_file", output=f"Replaced text in: {file_path}")
+        return ToolResult(ok=True, tool="replace_in_file", output=f"Replaced text in: {rel}")
 
 
 class PatchFileTool:
@@ -211,12 +216,13 @@ class PatchFileTool:
             raise ValidationError("old_lines must not be empty.")
 
         file_path = resolve_workspace_path(path)
+        rel = file_path.relative_to(WORKSPACE)
         if not file_path.exists():
             return ToolResult(
                 ok=False,
                 tool="patch_file",
                 output=(
-                    f"File not found: {file_path}. "
+                    f"File not found: {rel}. "
                     "patch_file can only modify existing files — use write_file or code_file to create a new file."
                 ),
             )
@@ -234,5 +240,4 @@ class PatchFileTool:
 
         updated = content.replace(old_lines, new_lines, 1)
         file_path.write_text(updated, encoding="utf-8")
-        rel = file_path.relative_to(WORKSPACE)
         return ToolResult(ok=True, tool="patch_file", output=f"Patched file: {rel}")
