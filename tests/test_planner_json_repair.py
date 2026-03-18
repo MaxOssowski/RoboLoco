@@ -22,6 +22,7 @@ class PlannerJsonRepairTests(unittest.TestCase):
 {
   "reasoning_summary": "Write file",
   "status": "ready",
+  "success_criteria": ["file example.py exists"],
   "actions": [
     {"agent": "coder", "tool": "write_file", "args": {"path": "example.py", "content": "print('hi')"}}
   ]

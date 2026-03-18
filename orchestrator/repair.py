@@ -48,8 +48,8 @@ class RepairDiagnostic:
     """
 
     attempt: int
-    success_criteria: str         # from the previous plan — what was supposed to be true
-    verification_reasoning: str   # why the verifier was unsatisfied (or "Tool failed before verification.")
+    success_criteria: list[str]       # structured criteria from previous plan
+    verification_reasoning: str       # why the verifier was unsatisfied (or "Tool failed before verification.")
     failed_fingerprint: FailedActionFingerprint | None = None   # None for semantic-only failures
     prior_fingerprints: list[FailedActionFingerprint] = field(default_factory=list)
 

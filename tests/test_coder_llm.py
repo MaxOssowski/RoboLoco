@@ -205,7 +205,7 @@ class CoderLLMTests(unittest.TestCase):
         data = {
             "reasoning_summary": "Create a script.",
             "status": "ready",
-            "success_criteria": "File exists with correct content.",
+            "success_criteria": ["file out.py exists", "python3 out.py exits with code 0"],
             "actions": [
                 {
                     "agent": "coder",

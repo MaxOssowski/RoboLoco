@@ -155,6 +155,7 @@ class Orchestrator:
                     "reasoning_summary": plan.reasoning_summary,
                     "status": plan.status,
                     "actions": [call.__dict__ for call in plan.actions],
+                    "success_criteria": plan.success_criteria,
                     "attempt": attempt,
                 },
             )

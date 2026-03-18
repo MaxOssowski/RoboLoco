@@ -126,9 +126,23 @@ Malformed planner output:
 
             actions.append(ToolCall(agent=agent, tool=tool, args=args))
 
-        success_criteria = data.get("success_criteria", "")
-        if not isinstance(success_criteria, str):
-            success_criteria = ""
+        # success_criteria is required and must be a non-empty list of non-empty strings
+        sc_raw = data.get("success_criteria")
+        if not isinstance(sc_raw, list):
+            raise ValidationError(
+                f"success_criteria must be a list of strings, got {type(sc_raw).__name__}. "
+                "Provide at least one concrete, testable condition."
+            )
+        if not sc_raw:
+            raise ValidationError(
+                "success_criteria must not be empty. "
+                "Provide at least one concrete, testable condition."
+            )
+        if not all(isinstance(c, str) and c.strip() for c in sc_raw):
+            raise ValidationError(
+                "Every success criterion must be a non-empty string."
+            )
+        success_criteria = [c.strip() for c in sc_raw]
 
         return AgentResult(
             agent=self.name,
@@ -167,6 +181,7 @@ Malformed planner output:
 - Use summarize_file when you need a concise understanding of a file instead of raw contents.
 - Use researcher for inspection tasks like listing files, searching in files, or reading existing files.
 - Never assign write_file, code_file, modify_file, or run_shell to researcher.
+- success_criteria must be a non-empty JSON array of strings. Each string must be one concrete, testable condition. Good: "file foo.py exists", "python3 foo.py exits with code 0", "stdout contains 'hello world'". Bad: "task is completed", "works correctly". An empty array is not allowed.
 - Keep reasoning_summary short.
 - status should usually be "ready".
 - Produce the smallest viable action list."""
@@ -180,7 +195,11 @@ Malformed planner output:
 {
   "reasoning_summary": "...",
   "status": "ready",
-  "success_criteria": "Brief description of what success looks like",
+  "success_criteria": [
+    "file hello.py exists",
+    "python3 hello.py exits with code 0",
+    "stdout contains 'hello world'"
+  ],
   "actions": [
     {"agent": "researcher", "tool": "summarize_file", "args": {"path": "agents/planner.py"}},
     {"agent": "coder", "tool": "code_file", "args": {"path": "hello.py", "specification": "Print 'hello world' to stdout."}},
@@ -214,7 +233,14 @@ Return JSON in exactly this shape:
 
     def _build_repair_prompt(self, state: TaskState, diagnostic: dict) -> str:
         attempt = diagnostic["attempt"]
-        success_criteria = diagnostic.get("success_criteria", "")
+        sc_raw = diagnostic.get("success_criteria", [])
+        # Handle both list (new) and string (legacy) shapes gracefully
+        if isinstance(sc_raw, list) and sc_raw:
+            criteria_text = "\n".join(f"  - {c}" for c in sc_raw)
+        elif isinstance(sc_raw, str) and sc_raw:
+            criteria_text = f"  - {sc_raw}"
+        else:
+            criteria_text = "  (none specified)"
         verification_reasoning = diagnostic.get("verification_reasoning", "")
         failed_fp = diagnostic.get("failed_fingerprint")
         is_repeated = diagnostic.get("is_repeated_failure", False)
@@ -261,7 +287,7 @@ Goal:
 {state.goal}
 
 Unmet success criteria:
-{success_criteria if success_criteria else "(none specified)"}
+{criteria_text}
 
 {failure_section}
 

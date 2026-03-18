@@ -90,15 +90,20 @@ class VerifierAgent:
             raise RuntimeError((result.stderr or result.stdout or "Ollama call failed").strip())
         return (result.stdout or "").strip()
 
-    def _get_success_criteria(self, state: TaskState) -> str:
-        """Extract the success_criteria from the most recent planner result in history."""
+    def _get_success_criteria(self, state: TaskState) -> list[str]:
+        """Extract structured success_criteria from the most recent planner result in history."""
         for event in reversed(state.history):
             if (
                 event["event_type"] == "agent_result"
                 and event["payload"].get("agent") == "planner"
             ):
-                return event["payload"].get("success_criteria", "")
-        return ""
+                val = event["payload"].get("success_criteria", [])
+                if isinstance(val, list):
+                    return val
+                # backward-compat: plain string stored by older code
+                if isinstance(val, str) and val:
+                    return [val]
+        return []
 
     def _build_source_verification_prompt(
         self,
@@ -107,10 +112,13 @@ class VerifierAgent:
         file_content: str,
         compile_ok: bool,
         compile_output: str,
-        success_criteria: str,
+        success_criteria: list[str],
     ) -> str:
         compile_section = "PASSED (no errors)" if compile_ok else f"FAILED:\n{compile_output}"
-        criteria_section = success_criteria if success_criteria else "(none specified)"
+        if success_criteria:
+            criteria_section = "\n".join(f"  {i + 1}. {c}" for i, c in enumerate(success_criteria))
+        else:
+            criteria_section = "(none specified)"
         return f"""
 You are the verifier agent in a local multi-agent coding system.
 Return ONLY valid JSON. Do not add commentary before or after the JSON.
@@ -227,7 +235,11 @@ Allowed statuses:
         recent_tools = [e["payload"] for e in state.history if e["event_type"] == "tool_result"][-6:]
         tool_text = json.dumps(recent_tools, indent=2)
         success_criteria = self._get_success_criteria(state)
-        criteria_section = f"\nSuccess criteria:\n{success_criteria}\n" if success_criteria else ""
+        if success_criteria:
+            numbered = "\n".join(f"  {i + 1}. {c}" for i, c in enumerate(success_criteria))
+            criteria_section = f"\nSuccess criteria (evaluate each):\n{numbered}\n"
+        else:
+            criteria_section = ""
 
         return f"""
 You are the verifier agent in a local multi-agent coding system.
