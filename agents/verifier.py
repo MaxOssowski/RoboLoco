@@ -203,11 +203,12 @@ Allowed statuses:
             )
 
     def _written_files_exist(self, tool_events: list) -> tuple[bool, list[str]]:
-        """Check every file reported written by write_file actually exists on disk."""
+        """Check every file reported written by write_file/code_file/modify_file exists on disk."""
         missing = []
+        _file_writing_tools = {"write_file", "code_file", "modify_file"}
         for e in tool_events:
             p = e["payload"]
-            if p.get("tool") == "write_file" and p.get("ok"):
+            if p.get("tool") in _file_writing_tools and p.get("ok"):
                 output = p.get("output", "")
                 if output.startswith("Wrote file:"):
                     rel_path = output[len("Wrote file:"):].strip()

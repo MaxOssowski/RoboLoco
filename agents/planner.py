@@ -157,19 +157,22 @@ Malformed planner output:
 - All paths must be relative.
 - Prefer python3 over python.
 - Do not use shell chaining, pipes, redirects, or multiple commands.
-- Use replace_in_file when changing part of an existing file instead of rewriting the whole file.
-- If a task requires creating and running a Python file, first assign write_file to coder, then run_shell to verifier.
+- To create a new code file, use code_file (coder). Provide a clear natural-language specification — do NOT write the code yourself.
+- To modify an existing code file, use modify_file (coder). Describe the required change as a specification — do NOT write the new code yourself.
+- Use replace_in_file (coder) only for small, literal text substitutions where no code generation is needed.
+- Use write_file (coder) only for non-code content such as plain-text files or config files.
+- After every code_file or write_file action, always follow it with a file_exists action (verifier agent) to confirm the file was created. This is mandatory, not optional.
+- If a task requires running a Python file, follow the coder action with run_shell (verifier).
 - If the task produces an interactive or GUI Python app (e.g. pygame, tkinter, a game with a window), do NOT add a run_shell action to the plan. Static verification will be performed automatically by the verifier.
-- After every write_file action, always follow it with a file_exists action (verifier agent) to confirm the file was created. This is mandatory, not optional.
 - Use summarize_file when you need a concise understanding of a file instead of raw contents.
 - Use researcher for inspection tasks like listing files, searching in files, or reading existing files.
-- Never assign write_file or run_shell to researcher.
+- Never assign write_file, code_file, modify_file, or run_shell to researcher.
 - Keep reasoning_summary short.
 - status should usually be "ready".
 - Produce the smallest viable action list."""
 
     _PERMISSIONS = """\
-- coder: write_file, read_file, replace_in_file
+- coder: code_file, modify_file, write_file, read_file, replace_in_file
 - verifier: run_shell, read_file, file_exists
 - researcher: read_file, list_files, search_in_files, file_exists, summarize_file"""
 
@@ -179,11 +182,11 @@ Malformed planner output:
   "status": "ready",
   "success_criteria": "Brief description of what success looks like",
   "actions": [
-    {"agent": "researcher", "tool": "search_in_files", "args": {"pattern": "ToolCall", "path": "."}},
     {"agent": "researcher", "tool": "summarize_file", "args": {"path": "agents/planner.py"}},
-    {"agent": "coder", "tool": "replace_in_file", "args": {"path": "example.py", "old_text": "print('hi')", "new_text": "print('hello')"}},
-    {"agent": "verifier", "tool": "run_shell", "args": {"command": "python3 example.py"}},
-    {"agent": "verifier", "tool": "file_exists", "args": {"path": "example.py"}}
+    {"agent": "coder", "tool": "code_file", "args": {"path": "hello.py", "specification": "Print 'hello world' to stdout."}},
+    {"agent": "verifier", "tool": "file_exists", "args": {"path": "hello.py"}},
+    {"agent": "verifier", "tool": "run_shell", "args": {"command": "python3 hello.py"}},
+    {"agent": "coder", "tool": "modify_file", "args": {"path": "hello.py", "specification": "Change the greeting to say 'hello universe'."}}
   ]
 }"""
 
