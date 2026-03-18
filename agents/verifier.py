@@ -337,14 +337,6 @@ Allowed statuses:
                 status="failed",
             )
 
-        # Fast path: file_exists confirmation is deterministic proof — skip LLM
-        if self._has_confirmed_file_exists(last_tool_events):
-            return AgentResult(
-                agent=self.name,
-                reasoning_summary="All tools succeeded and file existence confirmed on disk.",
-                status="passed",
-            )
-
         if is_interactive_python_task(state.goal):
             target_file = find_target_python_file(state.goal)
             if target_file:
@@ -364,31 +356,28 @@ Allowed statuses:
                 status="failed",
             )
 
-        # Inconclusive but all tools passed and no files are missing:
-        # treat as passed only if there is at least some tool evidence of work done
-        has_shell_success = any(
+        # Non-strict: inconclusive stays inconclusive — prefer false negatives
+        observed: list[str] = []
+        if self._has_confirmed_file_exists(last_tool_events):
+            observed.append("file existence confirmed on disk")
+        if any(
             e["payload"].get("tool") == "run_shell" and e["payload"].get("ok")
             for e in last_tool_events
-        )
-        has_write_success = any(
-            e["payload"].get("tool") == "write_file" and e["payload"].get("ok")
+        ):
+            observed.append("shell command exited with code 0")
+        if any(
+            e["payload"].get("tool") in {"write_file", "code_file", "modify_file"}
+            and e["payload"].get("ok")
             for e in last_tool_events
-        )
-        if has_shell_success or has_write_success:
-            return AgentResult(
-                agent=self.name,
-                reasoning_summary=(
-                    "All tools succeeded with evidence of output; "
-                    "semantic verification was inconclusive."
-                ),
-                status="passed",
-            )
-
+        ):
+            observed.append("file was written")
+        evidence = "; ".join(observed) if observed else "no notable tool evidence"
         return AgentResult(
             agent=self.name,
             reasoning_summary=(
-                "No clear evidence the goal was achieved. "
-                "Semantic verification was inconclusive and no output-producing tools ran."
+                f"Semantic verification was inconclusive — output content and "
+                f"behavior were not confirmed ({evidence}). "
+                "Cannot count this as success without stronger proof."
             ),
             status="inconclusive",
         )

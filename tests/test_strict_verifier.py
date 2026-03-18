@@ -25,7 +25,7 @@ class StrictVerifierTests(unittest.TestCase):
         ):
             result = verifier.act(state)
 
-        self.assertEqual(result.status, "passed")
+        self.assertEqual(result.status, "inconclusive")
         self.assertIn("inconclusive", result.reasoning_summary.lower())
 
     def test_verifier_fails_closed_in_strict_mode(self) -> None:
