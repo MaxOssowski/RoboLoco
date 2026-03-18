@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from typing import Any, Dict, List
 
@@ -31,7 +32,13 @@ class PlannerAgent:
             raise RuntimeError((result.stderr or result.stdout or "Ollama call failed").strip())
         return (result.stdout or "").strip()
 
+    # Matches <think>...</think> reasoning blocks emitted by thinking models.
+    _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+
     def _extract_json(self, text: str) -> Dict[str, Any]:
+        # Remove reasoning blocks before attempting to parse JSON.
+        text = self._THINK_RE.sub("", text)
+        text = re.sub(r"</think>", "", text)
         text = text.strip()
 
         try:
@@ -186,19 +193,17 @@ class PlannerAgent:
 
     _SCHEMA = """\
 {
-  "reasoning_summary": "...",
+  "reasoning_summary": "one-line description of the plan",
   "status": "ready",
   "success_criteria": [
-    "file hello.py exists",
-    "python3 hello.py exits with code 0",
-    "stdout contains 'hello world'"
+    "file <target>.py exists",
+    "python3 <target>.py exits with code 0"
   ],
   "actions": [
-    {"agent": "researcher", "tool": "summarize_file", "args": {"path": "agents/planner.py"}},
-    {"agent": "coder", "tool": "code_file", "args": {"path": "hello.py", "specification": "Print 'hello world' to stdout."}},
-    {"agent": "verifier", "tool": "file_exists", "args": {"path": "hello.py"}},
-    {"agent": "verifier", "tool": "run_shell", "args": {"command": "python3 hello.py"}},
-    {"agent": "coder", "tool": "patch_file", "args": {"path": "hello.py", "old_lines": "print('hello world')", "new_lines": "print('hello universe')"}}
+    {"agent": "coder", "tool": "code_file", "args": {"path": "<target>.py", "specification": "<natural-language description of what the file must do>"}},
+    {"agent": "verifier", "tool": "file_exists", "args": {"path": "<target>.py"}},
+    {"agent": "verifier", "tool": "run_shell", "args": {"command": "python3 <target>.py"}},
+    {"agent": "coder", "tool": "patch_file", "args": {"path": "<target>.py", "old_lines": "<exact existing text to replace>", "new_lines": "<replacement text>"}}
   ]
 }"""
 
