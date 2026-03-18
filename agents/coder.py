@@ -106,7 +106,13 @@ Current file content:
         if not write_result.ok:
             return ToolResult(ok=False, tool="code_file", output=f"Write failed: {write_result.output}")
 
-        return ToolResult(ok=True, tool="code_file", output=f"Wrote file: {path}")
+        rel = write_result.data.get("path", path)
+        return ToolResult(
+            ok=True,
+            tool="code_file",
+            output=f"Wrote file: {rel}",
+            data={"kind": "file_write", "path": rel},
+        )
 
     def _execute_modify_file(self, call: ToolCall, state: TaskState) -> ToolResult:
         """Read an existing file, apply a specification-driven LLM edit, and write it back."""
@@ -140,7 +146,13 @@ Current file content:
         if not write_result.ok:
             return ToolResult(ok=False, tool="modify_file", output=f"Write failed: {write_result.output}")
 
-        return ToolResult(ok=True, tool="modify_file", output=f"Wrote file: {path}")
+        rel = write_result.data.get("path", path)
+        return ToolResult(
+            ok=True,
+            tool="modify_file",
+            output=f"Wrote file: {rel}",
+            data={"kind": "file_write", "path": rel},
+        )
 
     # ── Main execution entry point ────────────────────────────────────────────
 

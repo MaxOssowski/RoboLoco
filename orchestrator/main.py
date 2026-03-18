@@ -89,6 +89,9 @@ class Orchestrator:
         key_outputs: list[str] = []
         seen_tools: set[str] = set()
 
+        _file_mutation_kinds = {"file_write", "file_patch", "file_replace"}
+        _file_writing_tools = {"write_file", "code_file", "modify_file"}
+
         for r in all_tool_results:
             tool = r.get("tool", "")
             if tool not in seen_tools:
@@ -97,7 +100,12 @@ class Orchestrator:
 
             if r.get("ok"):
                 output = r.get("output", "")
-                if tool in ("write_file", "code_file", "modify_file") and output.startswith("Wrote file:"):
+                data = r.get("data", {})
+
+                # Prefer structured metadata; fall back to string parsing for legacy entries.
+                if data.get("kind") in _file_mutation_kinds and "path" in data:
+                    files_touched.append(data["path"])
+                elif tool in _file_writing_tools and output.startswith("Wrote file:"):
                     files_touched.append(output[len("Wrote file:"):].strip())
                 elif tool == "replace_in_file" and output.startswith("Replaced text in:"):
                     files_touched.append(output[len("Replaced text in:"):].strip())
