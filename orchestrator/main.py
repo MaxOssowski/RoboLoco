@@ -16,6 +16,7 @@ from orchestrator.repair import (
 )
 from orchestrator.router import Router
 from orchestrator.state import AgentResult, ModelConfig, TaskState, ToolResult
+from tools.coder_tools import CodeFileTool, ModifyFileTool
 from tools.filesystem import (
     FileExistsTool,
     FilesystemTool,
@@ -40,6 +41,10 @@ class Orchestrator:
             models = ModelConfig(default=model)
 
         self.tool_registry = {
+            # Coder-native sentinels (CoderAgent intercepts these; never called via .run())
+            CodeFileTool.name: CodeFileTool,
+            ModifyFileTool.name: ModifyFileTool,
+            # Standard filesystem and shell tools
             FilesystemTool.name: FilesystemTool,
             ReadFileTool.name: ReadFileTool,
             FileExistsTool.name: FileExistsTool,
@@ -90,7 +95,7 @@ class Orchestrator:
 
             if r.get("ok"):
                 output = r.get("output", "")
-                if tool == "write_file" and output.startswith("Wrote file:"):
+                if tool in ("write_file", "code_file", "modify_file") and output.startswith("Wrote file:"):
                     files_touched.append(output[len("Wrote file:"):].strip())
                 elif tool == "replace_in_file" and output.startswith("Replaced text in:"):
                     files_touched.append(output[len("Replaced text in:"):].strip())
