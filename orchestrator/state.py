@@ -30,7 +30,7 @@ class AgentResult:
     reasoning_summary: str
     actions: List[ToolCall] = field(default_factory=list)
     status: str = "ready"
-    success_criteria: str = ""
+    success_criteria: List[str] = field(default_factory=list)
 
 
 @dataclass

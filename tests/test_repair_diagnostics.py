@@ -64,7 +64,7 @@ class RepairDiagnosticTests(unittest.TestCase):
     def test_not_repeated_when_no_prior_fingerprints(self) -> None:
         diag = RepairDiagnostic(
             attempt=0,
-            success_criteria="file exists",
+            success_criteria=["file exists"],
             verification_reasoning="tool failed",
             failed_fingerprint=self._fp(0),
             prior_fingerprints=[],
@@ -76,7 +76,7 @@ class RepairDiagnosticTests(unittest.TestCase):
         fp1 = self._fp(1)  # identical signature
         diag = RepairDiagnostic(
             attempt=1,
-            success_criteria="file exists",
+            success_criteria=["file exists"],
             verification_reasoning="tool failed",
             failed_fingerprint=fp1,
             prior_fingerprints=[fp0],
@@ -88,7 +88,7 @@ class RepairDiagnosticTests(unittest.TestCase):
         fp1 = self._fp(1, tool="replace_in_file")
         diag = RepairDiagnostic(
             attempt=1,
-            success_criteria="ok",
+            success_criteria=["ok"],
             verification_reasoning="fail",
             failed_fingerprint=fp1,
             prior_fingerprints=[fp0],
@@ -98,7 +98,7 @@ class RepairDiagnosticTests(unittest.TestCase):
     def test_not_repeated_when_no_failed_fingerprint(self) -> None:
         diag = RepairDiagnostic(
             attempt=0,
-            success_criteria="",
+            success_criteria=[],
             verification_reasoning="semantic fail",
             failed_fingerprint=None,
         )
@@ -108,7 +108,7 @@ class RepairDiagnosticTests(unittest.TestCase):
         fp = self._fp(0)
         diag = RepairDiagnostic(
             attempt=0,
-            success_criteria="file written",
+            success_criteria=["file written"],
             verification_reasoning="fail",
             failed_fingerprint=fp,
             prior_fingerprints=[],
@@ -128,7 +128,7 @@ class RepairDiagnosticTests(unittest.TestCase):
         fp1 = self._fp(1)
         diag = RepairDiagnostic(
             attempt=1,
-            success_criteria="ok",
+            success_criteria=["ok"],
             verification_reasoning="fail",
             failed_fingerprint=fp1,
             prior_fingerprints=[fp0],
@@ -140,12 +140,23 @@ class RepairDiagnosticTests(unittest.TestCase):
     def test_as_dict_none_fingerprint(self) -> None:
         diag = RepairDiagnostic(
             attempt=0,
-            success_criteria="ok",
+            success_criteria=["ok"],
             verification_reasoning="verifier said no",
             failed_fingerprint=None,
         )
         d = diag.as_dict()
         self.assertIsNone(d["failed_fingerprint"])
+
+    def test_as_dict_success_criteria_is_list(self) -> None:
+        criteria = ["file exists", "exit code 0"]
+        diag = RepairDiagnostic(
+            attempt=0,
+            success_criteria=criteria,
+            verification_reasoning="fail",
+        )
+        d = diag.as_dict()
+        self.assertIsInstance(d["success_criteria"], list)
+        self.assertEqual(d["success_criteria"], criteria)
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +168,10 @@ class OrchestratorRepairDiagnosticTests(unittest.TestCase):
     def setUp(self) -> None:
         self.orchestrator = Orchestrator(model="test-model")
 
-    def _plan_with(self, actions, success_criteria=""):
+    def _plan_with(self, actions, success_criteria=None):
+        if success_criteria is None:
+            success_criteria = []
+
         def fake_plan(state, tool_registry):
             return AgentResult(
                 agent="planner",
@@ -172,7 +186,7 @@ class OrchestratorRepairDiagnosticTests(unittest.TestCase):
         """file_exists on a nonexistent path → tool failure → repair_diagnostic with fingerprint."""
         plan = self._plan_with(
             actions=[ToolCall(agent="verifier", tool="file_exists", args={"path": "__nonexistent_diag_test__.py"})],
-            success_criteria="The nonexistent file exists.",
+            success_criteria=["The nonexistent file exists."],
         )
         with patch.object(self.orchestrator.planner, "act", side_effect=plan):
             result = self.orchestrator.run("check file", max_retries=0)
@@ -184,14 +198,14 @@ class OrchestratorRepairDiagnosticTests(unittest.TestCase):
         self.assertEqual(payload["failed_fingerprint"]["tool"], "file_exists")
         self.assertEqual(payload["failed_fingerprint"]["agent"], "verifier")
         self.assertEqual(payload["failed_fingerprint"]["arg_keys"], ["path"])
-        self.assertEqual(payload["success_criteria"], "The nonexistent file exists.")
+        self.assertEqual(payload["success_criteria"], ["The nonexistent file exists."])
         self.assertFalse(payload["is_repeated_failure"])
 
     def test_semantic_failure_emits_repair_diagnostic_without_fingerprint(self) -> None:
         """All tools pass but verifier rejects → repair_diagnostic with no fingerprint."""
         plan = self._plan_with(
             actions=[ToolCall(agent="verifier", tool="run_shell", args={"command": "pwd"})],
-            success_criteria="Output matches expected.",
+            success_criteria=["Output matches expected."],
         )
         with patch.object(self.orchestrator.planner, "act", side_effect=plan):
             with patch.object(
@@ -208,13 +222,13 @@ class OrchestratorRepairDiagnosticTests(unittest.TestCase):
         payload = diag_events[0]["payload"]
         self.assertIsNone(payload["failed_fingerprint"])
         self.assertEqual(payload["verification_reasoning"], "Goal not achieved.")
-        self.assertEqual(payload["success_criteria"], "Output matches expected.")
+        self.assertEqual(payload["success_criteria"], ["Output matches expected."])
 
     def test_repeated_fingerprint_detected_across_retries(self) -> None:
         """Same failing pattern across attempts sets is_repeated_failure on 2nd+ diagnostics."""
         plan = self._plan_with(
             actions=[ToolCall(agent="verifier", tool="file_exists", args={"path": "__nonexistent_diag_test__.py"})],
-            success_criteria="File exists.",
+            success_criteria=["File exists."],
         )
         with patch.object(self.orchestrator.planner, "act", side_effect=plan):
             result = self.orchestrator.run("check file", max_retries=2)
@@ -261,7 +275,7 @@ class PlannerRepairPromptTests(unittest.TestCase):
             return {
                 "reasoning_summary": "fixed",
                 "status": "ready",
-                "success_criteria": "ok",
+                "success_criteria": ["Plan fixed successfully."],
                 "actions": [],
             }
 
@@ -281,7 +295,7 @@ class PlannerRepairPromptTests(unittest.TestCase):
         fp = fingerprint_failed_action("coder", "write_file", {"path": "foo.py"}, "Permission denied", 0)
         diag = RepairDiagnostic(
             attempt=0,
-            success_criteria="foo.py is created with correct content.",
+            success_criteria=["foo.py is created with correct content."],
             verification_reasoning="Tool failed.",
             failed_fingerprint=fp,
             prior_fingerprints=[],
@@ -298,7 +312,7 @@ class PlannerRepairPromptTests(unittest.TestCase):
         state = TaskState(goal="run tests")
         diag = RepairDiagnostic(
             attempt=0,
-            success_criteria="All tests pass with exit code 0.",
+            success_criteria=["All tests pass with exit code 0."],
             verification_reasoning="Tests failed.",
             failed_fingerprint=None,
         )
@@ -313,7 +327,7 @@ class PlannerRepairPromptTests(unittest.TestCase):
         fp1 = fingerprint_failed_action("coder", "write_file", {"path": "foo.py"}, "err", 1)
         diag = RepairDiagnostic(
             attempt=1,
-            success_criteria="File created.",
+            success_criteria=["File created."],
             verification_reasoning="Tool failed.",
             failed_fingerprint=fp1,
             prior_fingerprints=[fp0],
@@ -330,7 +344,7 @@ class PlannerRepairPromptTests(unittest.TestCase):
         fp1 = fingerprint_failed_action("coder", "write_file", {"path": "foo.py"}, "err", 1)
         diag = RepairDiagnostic(
             attempt=1,
-            success_criteria="File created.",
+            success_criteria=["File created."],
             verification_reasoning="Tool failed.",
             failed_fingerprint=fp1,
             prior_fingerprints=[fp0],
@@ -345,7 +359,7 @@ class PlannerRepairPromptTests(unittest.TestCase):
         fp = fingerprint_failed_action("coder", "write_file", {"path": "foo.py"}, "err", 0)
         diag = RepairDiagnostic(
             attempt=0,
-            success_criteria="File created.",
+            success_criteria=["File created."],
             verification_reasoning="Tool failed.",
             failed_fingerprint=fp,
             prior_fingerprints=[],
@@ -359,7 +373,7 @@ class PlannerRepairPromptTests(unittest.TestCase):
         state = TaskState(goal="run script")
         diag = RepairDiagnostic(
             attempt=0,
-            success_criteria="Output contains 'hello'.",
+            success_criteria=["Output contains 'hello'."],
             verification_reasoning="Output was 'world', not 'hello'.",
             failed_fingerprint=None,
         )
