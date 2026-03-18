@@ -48,6 +48,68 @@ class CoderLLMTests(unittest.TestCase):
         written = (WORKSPACE / "test_coder_llm" / "hello.py").read_text(encoding="utf-8")
         self.assertIn("hello world", written)
 
+    # ── _extract_code: chain-of-thought / thinking model output ──────────────
+
+    def test_extract_code_strips_think_block(self) -> None:
+        raw = "<think>\nOkay, the user wants hello world.\n</think>\nprint('hello world')"
+        result = self.coder._extract_code(raw)
+        self.assertEqual(result, "print('hello world')")
+
+    def test_extract_code_strips_multiline_think_block(self) -> None:
+        raw = (
+            "<think>\n"
+            "Let me reason through this.\n"
+            "Step 1: import sys\n"
+            "Step 2: call print\n"
+            "</think>\n"
+            "print('hello world')"
+        )
+        result = self.coder._extract_code(raw)
+        self.assertEqual(result, "print('hello world')")
+        self.assertNotIn("<think>", result)
+        self.assertNotIn("Let me reason", result)
+
+    def test_extract_code_strips_think_block_before_fence(self) -> None:
+        raw = (
+            "<think>user wants fenced code</think>\n"
+            "```python\nprint('hi')\n```"
+        )
+        result = self.coder._extract_code(raw)
+        self.assertNotIn("<think>", result)
+        self.assertNotIn("```", result)
+        self.assertEqual(result, "print('hi')")
+
+    def test_extract_code_strips_bare_close_think_tag(self) -> None:
+        # Some model variants emit </think> without an opening tag
+        raw = "</think>\nprint('hi')"
+        result = self.coder._extract_code(raw)
+        self.assertNotIn("</think>", result)
+        self.assertEqual(result, "print('hi')")
+
+    def test_extract_code_no_contamination_unchanged(self) -> None:
+        raw = "print('hello world')"
+        self.assertEqual(self.coder._extract_code(raw), raw)
+
+    def test_code_file_with_think_block_writes_clean_code(self) -> None:
+        """End-to-end: LLM response with <think> block produces a clean file."""
+        llm_response = (
+            "<think>\nOkay, I need to print hello world.\n</think>\n"
+            "print('hello world')"
+        )
+        call = ToolCall(
+            agent="coder",
+            tool="code_file",
+            args={"path": "test_coder_llm/think.py", "specification": "Print hello world."},
+        )
+        with patch.object(self.coder, "_call_ollama", return_value=llm_response):
+            result = self.coder.execute(call, self.state)
+
+        self.assertTrue(result.ok)
+        written = (WORKSPACE / "test_coder_llm" / "think.py").read_text(encoding="utf-8")
+        self.assertNotIn("<think>", written)
+        self.assertNotIn("Okay, I need", written)
+        self.assertIn("print", written)
+
     def test_code_file_strips_markdown_fences(self) -> None:
         llm_response = "```python\nprint('hello')\n```"
         call = ToolCall(

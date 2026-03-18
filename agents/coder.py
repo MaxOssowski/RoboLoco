@@ -12,6 +12,7 @@ from __future__ import annotations
 #              and relevant file context, produces code, then persists it via
 #              the existing filesystem tools.
 
+import re
 import subprocess
 
 from orchestrator.policies import AGENT_PERMISSIONS, WORKSPACE
@@ -46,15 +47,35 @@ class CoderAgent:
             raise RuntimeError((result.stderr or result.stdout or "Ollama call failed").strip())
         return (result.stdout or "").strip()
 
+    # Matches <think>...</think> reasoning blocks emitted by thinking models
+    # such as Qwen3 and DeepSeek-R1.  The block may span many lines.
+    _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+
     def _extract_code(self, text: str) -> str:
-        """Strip markdown fences and return raw code content."""
+        """Strip chain-of-thought blocks and markdown fences; return raw code.
+
+        Handles (in order):
+        1. ``<think>…</think>`` blocks produced by thinking models (Qwen3, etc.)
+        2. ``/think`` tags used by some model variants
+        3. Fenced code blocks (````python` or plain ````` ```)
+        4. Plain text after all the above are removed
+        """
+        # 1. Remove <think>…</think> reasoning blocks.
+        text = self._THINK_RE.sub("", text)
+        # 2. Remove any bare /think marker that some variants emit without a
+        #    matching opening tag.
+        text = re.sub(r"</think>", "", text)
         text = text.strip()
+
+        # 3. Extract from the first fenced code block if present.
         for fence in ("```python", "```"):
             if fence in text:
                 start = text.index(fence) + len(fence)
                 end = text.find("```", start)
                 if end != -1:
                     return text[start:end].strip()
+
+        # 4. No fences — return whatever remains after reasoning removal.
         return text
 
     # ── Prompt builders ───────────────────────────────────────────────────────
