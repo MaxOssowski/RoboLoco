@@ -21,6 +21,7 @@ from tools.filesystem import (
     FileExistsTool,
     FilesystemTool,
     ListFilesTool,
+    PatchFileTool,
     ReadFileTool,
     ReplaceInFileTool,
     SummarizeFileTool,
@@ -51,6 +52,7 @@ class Orchestrator:
             SummarizeFileTool.name: SummarizeFileTool,
             ListFilesTool.name: ListFilesTool,
             ReplaceInFileTool.name: ReplaceInFileTool,
+            PatchFileTool.name: PatchFileTool,
             SearchInFilesTool.name: SearchInFilesTool,
             ShellTool.name: ShellTool,
         }
@@ -99,6 +101,8 @@ class Orchestrator:
                     files_touched.append(output[len("Wrote file:"):].strip())
                 elif tool == "replace_in_file" and output.startswith("Replaced text in:"):
                     files_touched.append(output[len("Replaced text in:"):].strip())
+                elif tool == "patch_file" and output.startswith("Patched file:"):
+                    files_touched.append(output[len("Patched file:"):].strip())
                 elif tool == "run_shell":
                     key_outputs.append(output)
 

@@ -185,3 +185,54 @@ class ReplaceInFileTool:
         updated = content.replace(old_text, new_text, 1)
         file_path.write_text(updated, encoding="utf-8")
         return ToolResult(ok=True, tool="replace_in_file", output=f"Replaced text in: {file_path}")
+
+
+class PatchFileTool:
+    """Context-based patch tool for modifying sections of existing files.
+
+    Finds ``old_lines`` verbatim in the file and replaces the first occurrence
+    with ``new_lines``.  Fails loudly when the file is missing or when the
+    context string is not found — no fuzzy matching, no silent corruption.
+    """
+
+    name = "patch_file"
+
+    @staticmethod
+    def run(args: Dict[str, Any]) -> ToolResult:
+        path = args.get("path")
+        old_lines = args.get("old_lines")
+        new_lines = args.get("new_lines")
+
+        if not isinstance(old_lines, str):
+            raise ValidationError("old_lines must be a string.")
+        if not isinstance(new_lines, str):
+            raise ValidationError("new_lines must be a string.")
+        if not old_lines:
+            raise ValidationError("old_lines must not be empty.")
+
+        file_path = resolve_workspace_path(path)
+        if not file_path.exists():
+            return ToolResult(
+                ok=False,
+                tool="patch_file",
+                output=(
+                    f"File not found: {file_path}. "
+                    "patch_file can only modify existing files — use write_file or code_file to create a new file."
+                ),
+            )
+
+        content = file_path.read_text(encoding="utf-8")
+        if old_lines not in content:
+            return ToolResult(
+                ok=False,
+                tool="patch_file",
+                output=(
+                    "patch_file: old_lines not found in file — context mismatch. "
+                    "Read the file first and ensure old_lines exactly matches existing content."
+                ),
+            )
+
+        updated = content.replace(old_lines, new_lines, 1)
+        file_path.write_text(updated, encoding="utf-8")
+        rel = file_path.relative_to(WORKSPACE)
+        return ToolResult(ok=True, tool="patch_file", output=f"Patched file: {rel}")
