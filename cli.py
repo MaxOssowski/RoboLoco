@@ -5,9 +5,11 @@ import argparse
 import itertools
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
+from dataclasses import dataclass
 
 try:
     import readline
@@ -48,6 +50,7 @@ HELP_TEXT = f"""
 
     {YELLOW}<task>{RESET}           Run agents on the given task
     {YELLOW}run <task>{RESET}       Same as above (explicit form)
+    {YELLOW}options{RESET}          View and edit runtime settings
     {YELLOW}help{RESET}             Show this message
     {YELLOW}exit  /  quit{RESET}    Close the session
 
@@ -57,6 +60,217 @@ HELP_TEXT = f"""
     {DIM}> run Write a function that checks if a string is a palindrome{RESET}
 {DIVIDER}
 """
+
+
+# ── Runtime settings ──────────────────────────────────────────────────────────
+
+@dataclass
+class Settings:
+    default_model: str = "llama3.1:8b"
+    planner_model: str | None = None
+    coder_model: str | None = None
+    verifier_model: str | None = None
+    researcher_model: str | None = None
+    planner_timeout: int = 60
+    strict_verifier: bool = False
+    verbose: bool = False
+
+    def to_model_config(self) -> ModelConfig:
+        return ModelConfig(
+            default=self.default_model,
+            planner=self.planner_model,
+            coder=self.coder_model,
+            verifier=self.verifier_model,
+            researcher=self.researcher_model,
+        )
+
+    def build_orchestrator(self) -> Orchestrator:
+        return Orchestrator(
+            models=self.to_model_config(),
+            strict_verifier=self.strict_verifier,
+            planner_timeout=self.planner_timeout,
+        )
+
+
+def _fetch_ollama_models() -> list[str]:
+    """Return model names reported by ``ollama list``."""
+    try:
+        r = subprocess.run(
+            ["ollama", "list"], capture_output=True, text=True, timeout=10
+        )
+        if r.returncode != 0:
+            return []
+        models: list[str] = []
+        for line in r.stdout.strip().splitlines()[1:]:  # skip header row
+            parts = line.split()
+            if parts:
+                models.append(parts[0])
+        return models
+    except Exception:
+        return []
+
+
+# ── Options menu ──────────────────────────────────────────────────────────────
+
+# (key, display-label) pairs in the order they appear in the menu
+_OPT_ROWS: list[tuple[str, str]] = [
+    ("default-model",    "Default model for all agents"),
+    ("planner-model",    "Planner agent model"),
+    ("coder-model",      "Coder agent model"),
+    ("verifier-model",   "Verifier agent model"),
+    ("researcher-model", "Researcher agent model"),
+    ("planner-timeout",  "Planner LLM timeout (seconds)"),
+    ("strict-verifier",  "Require verifier to pass"),
+    ("verbose",          "Print full JSON result"),
+]
+
+_MODEL_OPTS = frozenset(
+    {"default-model", "planner-model", "coder-model", "verifier-model", "researcher-model"}
+)
+_BOOL_OPTS = frozenset({"strict-verifier", "verbose"})
+
+
+def _opt_display(key: str, s: Settings) -> str:
+    """Coloured current-value string for one option row."""
+    mc = s.to_model_config()
+    if key == "default-model":
+        return f"{YELLOW}{s.default_model}{RESET}"
+    if key in _MODEL_OPTS:
+        agent = key.replace("-model", "")
+        override = getattr(s, f"{agent}_model", None)
+        eff = mc.for_agent(agent)
+        return f"{YELLOW}{override}{RESET}" if override else f"{DIM}(default → {eff}){RESET}"
+    if key == "planner-timeout":
+        return f"{YELLOW}{s.planner_timeout}{RESET} s"
+    if key == "strict-verifier":
+        return f"{GREEN}on{RESET}" if s.strict_verifier else f"{DIM}off{RESET}"
+    if key == "verbose":
+        return f"{GREEN}on{RESET}" if s.verbose else f"{DIM}off{RESET}"
+    return "?"
+
+
+def _print_options(s: Settings) -> None:
+    key_width = max(len(k) for k, _ in _OPT_ROWS)
+    print(f"\n{DIVIDER}")
+    print(f"  {BOLD}Options{RESET}\n")
+    for i, (key, _desc) in enumerate(_OPT_ROWS, 1):
+        print(f"    {DIM}{i:>2}{RESET}  {key.ljust(key_width)}  {_opt_display(key, s)}")
+    print()
+
+
+def options_menu(s: Settings) -> bool:
+    """Interactive options editor.  Returns True when a value was changed."""
+    _print_options(s)
+    try:
+        raw = input(
+            f"  Enter number to edit, or {DIM}Enter{RESET} to cancel: "
+        ).strip()
+    except (KeyboardInterrupt, EOFError):
+        print()
+        print(f"{DIVIDER}\n")
+        return False
+    print(f"{DIVIDER}\n")
+
+    if not raw:
+        return False
+
+    try:
+        idx = int(raw) - 1
+        if not (0 <= idx < len(_OPT_ROWS)):
+            raise ValueError
+    except ValueError:
+        print(f"  {RED}Invalid choice.{RESET}\n")
+        return False
+
+    key, desc = _OPT_ROWS[idx]
+
+    # ── Model option ──────────────────────────────────────────────────────────
+    if key in _MODEL_OPTS:
+        print(f"  {DIM}Fetching available Ollama models…{RESET}")
+        available = _fetch_ollama_models()
+        if not available:
+            print(f"  {RED}Could not retrieve models from Ollama.{RESET}\n")
+            return False
+
+        is_per_agent = key != "default-model"
+        agent        = key.replace("-model", "")
+        current_val  = (
+            s.default_model if agent == "default"
+            else getattr(s, f"{agent}_model", None) or ""
+        )
+
+        print(f"\n  {BOLD}Available models{RESET}  — {desc}\n")
+        for j, m in enumerate(available, 1):
+            marker = f"  {GREEN}← current{RESET}" if m == current_val else ""
+            print(f"    {DIM}{j:>2}{RESET}  {m}{marker}")
+        if is_per_agent:
+            print(f"    {DIM} 0{RESET}  {DIM}(use default){RESET}")
+        print()
+
+        try:
+            pick = input(
+                f"  Pick [1–{len(available)}]"
+                + (", 0 to use default" if is_per_agent else "")
+                + f", or {DIM}Enter{RESET} to cancel: "
+            ).strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return False
+        print()
+
+        if not pick:
+            return False
+
+        if is_per_agent and pick == "0":
+            setattr(s, f"{agent}_model", None)
+            print(f"  {GREEN}✓{RESET}  {key} reset to default.\n")
+            return True
+
+        try:
+            pidx = int(pick) - 1
+            if not (0 <= pidx < len(available)):
+                raise ValueError
+        except ValueError:
+            print(f"  {RED}Invalid choice.{RESET}\n")
+            return False
+
+        chosen = available[pidx]
+        attr   = "default_model" if agent == "default" else f"{agent}_model"
+        setattr(s, attr, chosen)
+        print(f"  {GREEN}✓{RESET}  {key} set to {YELLOW}{chosen}{RESET}.\n")
+        return True
+
+    # ── planner-timeout ───────────────────────────────────────────────────────
+    if key == "planner-timeout":
+        try:
+            new_val = input(
+                f"  planner-timeout [{DIM}current: {s.planner_timeout} s{RESET}]"
+                f"  New value (s): "
+            ).strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return False
+        print()
+        if not new_val:
+            return False
+        try:
+            s.planner_timeout = int(new_val)
+        except ValueError:
+            print(f"  {RED}Must be an integer.{RESET}\n")
+            return False
+        print(f"  {GREEN}✓{RESET}  planner-timeout set to {YELLOW}{s.planner_timeout}{RESET} s.\n")
+        return True
+
+    # ── Boolean toggle ────────────────────────────────────────────────────────
+    if key in _BOOL_OPTS:
+        attr    = key.replace("-", "_")
+        new_val = not getattr(s, attr)
+        setattr(s, attr, new_val)
+        state   = f"{GREEN}on{RESET}" if new_val else f"{DIM}off{RESET}"
+        print(f"  {GREEN}✓{RESET}  {key} → {state}\n")
+        return True
+
+    return False
 
 
 _SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -171,32 +385,35 @@ def run_task(orchestrator: Orchestrator, task: str, verbose: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="RoboLoco — interactive AI agent session")
-    parser.add_argument("--model",           default="llama3.1:8b", help="Default Ollama model for all agents")
-    parser.add_argument("--planner-model",   default=None,          help="Ollama model for the planner agent")
-    parser.add_argument("--verifier-model",  default=None,          help="Ollama model for the verifier agent")
-    parser.add_argument("--coder-model",     default=None,          help="Ollama model for the coder agent")
-    parser.add_argument("--researcher-model",default=None,          help="Ollama model for the researcher agent")
+    parser.add_argument("--model",            default="llama3.1:8b", help="Default Ollama model for all agents")
+    parser.add_argument("--planner-model",    default=None,          help="Ollama model for the planner agent")
+    parser.add_argument("--verifier-model",   default=None,          help="Ollama model for the verifier agent")
+    parser.add_argument("--coder-model",      default=None,          help="Ollama model for the coder agent")
+    parser.add_argument("--researcher-model", default=None,          help="Ollama model for the researcher agent")
     parser.add_argument("--planner-timeout",  type=int, default=60,  help="Seconds before the planner Ollama call times out (default: 60)")
-    parser.add_argument("--strict-verifier", action="store_true",   help="Require semantic verification to pass")
-    parser.add_argument("--verbose", "-v",   action="store_true",   help="Print full JSON result after each task")
+    parser.add_argument("--strict-verifier",  action="store_true",   help="Require semantic verification to pass")
+    parser.add_argument("--verbose", "-v",    action="store_true",   help="Print full JSON result after each task")
     args = parser.parse_args()
 
-    models = ModelConfig(
-        default=args.model,
-        planner=args.planner_model,
-        verifier=args.verifier_model,
-        coder=args.coder_model,
-        researcher=args.researcher_model,
+    settings = Settings(
+        default_model=args.model,
+        planner_model=args.planner_model,
+        coder_model=args.coder_model,
+        verifier_model=args.verifier_model,
+        researcher_model=args.researcher_model,
+        planner_timeout=args.planner_timeout,
+        strict_verifier=args.strict_verifier,
+        verbose=args.verbose,
     )
 
-    print_banner(models)
+    print_banner(settings.to_model_config())
 
     if _READLINE_AVAILABLE:
         readline.set_history_length(500)
         if os.path.exists(_HISTORY_FILE):
             readline.read_history_file(_HISTORY_FILE)
 
-    orchestrator = Orchestrator(models=models, strict_verifier=args.strict_verifier, planner_timeout=args.planner_timeout)
+    orchestrator = settings.build_orchestrator()
 
     while True:
         try:
@@ -223,13 +440,20 @@ def main() -> None:
             print(HELP_TEXT)
             continue
 
+        if cmd == "options":
+            if options_menu(settings):
+                orchestrator = settings.build_orchestrator()
+                print(_model_line(settings.to_model_config()))
+                print()
+            continue
+
         task = raw[4:].strip() if cmd.startswith("run ") else raw
 
         if not task:
             print(f"  {RED}No task provided. Usage: run <task>{RESET}\n")
             continue
 
-        run_task(orchestrator, task, verbose=args.verbose)
+        run_task(orchestrator, task, verbose=settings.verbose)
 
 
 if __name__ == "__main__":
