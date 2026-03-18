@@ -217,11 +217,18 @@ Allowed statuses:
         for e in tool_events:
             p = e["payload"]
             if p.get("tool") in _file_writing_tools and p.get("ok"):
-                output = p.get("output", "")
-                if output.startswith("Wrote file:"):
+                data = p.get("data", {})
+                if data.get("kind") == "file_write" and "path" in data:
+                    # Structured metadata path (preferred)
+                    rel_path = data["path"]
+                else:
+                    # Legacy fallback: parse the human-readable output string
+                    output = p.get("output", "")
+                    if not output.startswith("Wrote file:"):
+                        continue
                     rel_path = output[len("Wrote file:"):].strip()
-                    if rel_path and not (WORKSPACE / rel_path).is_file():
-                        missing.append(rel_path)
+                if rel_path and not (WORKSPACE / rel_path).is_file():
+                    missing.append(rel_path)
         return len(missing) == 0, missing
 
     def _has_confirmed_file_exists(self, tool_events: list) -> bool:

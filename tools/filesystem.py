@@ -26,6 +26,7 @@ class FilesystemTool:
             ok=True,
             tool="write_file",
             output=f"Wrote file: {rel}",
+            data={"kind": "file_write", "path": str(rel)},
         )
 
 
@@ -63,7 +64,12 @@ class FileExistsTool:
         if not file_path.is_file():
             return ToolResult(ok=False, tool="file_exists", output=f"Path is not a file: {rel}")
 
-        return ToolResult(ok=True, tool="file_exists", output=f"File exists: {rel}")
+        return ToolResult(
+            ok=True,
+            tool="file_exists",
+            output=f"File exists: {rel}",
+            data={"kind": "file_exists", "path": str(rel), "exists": True},
+        )
 
 
 class SummarizeFileTool:
@@ -189,7 +195,12 @@ class ReplaceInFileTool:
 
         updated = content.replace(old_text, new_text, 1)
         file_path.write_text(updated, encoding="utf-8")
-        return ToolResult(ok=True, tool="replace_in_file", output=f"Replaced text in: {rel}")
+        return ToolResult(
+            ok=True,
+            tool="replace_in_file",
+            output=f"Replaced text in: {rel}",
+            data={"kind": "file_replace", "path": str(rel)},
+        )
 
 
 class PatchFileTool:
@@ -240,4 +251,9 @@ class PatchFileTool:
 
         updated = content.replace(old_lines, new_lines, 1)
         file_path.write_text(updated, encoding="utf-8")
-        return ToolResult(ok=True, tool="patch_file", output=f"Patched file: {rel}")
+        return ToolResult(
+            ok=True,
+            tool="patch_file",
+            output=f"Patched file: {rel}",
+            data={"kind": "file_patch", "path": str(rel)},
+        )

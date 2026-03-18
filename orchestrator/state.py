@@ -38,6 +38,7 @@ class ToolResult:
     ok: bool
     tool: str
     output: str
+    data: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
