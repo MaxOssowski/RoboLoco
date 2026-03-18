@@ -19,6 +19,12 @@ def main() -> None:
         action="store_true",
         help="Require semantic verification to return passed before treating the task as successful",
     )
+    parser.add_argument(
+        "--planner-timeout",
+        type=int,
+        default=60,
+        help="Planner LLM timeout in seconds (default: 60)",
+    )
     args = parser.parse_args()
 
     models = ModelConfig(
@@ -28,7 +34,7 @@ def main() -> None:
         coder=args.coder_model,
         researcher=args.researcher_model,
     )
-    orchestrator = Orchestrator(models=models, strict_verifier=args.strict_verifier)
+    orchestrator = Orchestrator(models=models, strict_verifier=args.strict_verifier, planner_timeout=args.planner_timeout)
     result = orchestrator.run(args.task)
     print(json.dumps(result, indent=2))
 
