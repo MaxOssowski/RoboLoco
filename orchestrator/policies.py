@@ -21,7 +21,7 @@ ALLOWED_SHELL_PREFIXES = [
 
 AGENT_PERMISSIONS: Dict[str, Set[str]] = {
     "planner": set(),
-    "coder": {"write_file", "read_file", "replace_in_file", "code_file", "modify_file"},
+    "coder": {"write_file", "read_file", "replace_in_file", "patch_file", "code_file", "modify_file"},
     "verifier": {"read_file", "run_shell", "file_exists"},
     "researcher": {"read_file", "list_files", "search_in_files", "file_exists", "summarize_file"},
 }

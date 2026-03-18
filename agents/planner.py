@@ -172,22 +172,23 @@ Malformed planner output:
 - Prefer python3 over python.
 - Do not use shell chaining, pipes, redirects, or multiple commands.
 - To create a new code file, use code_file (coder). Provide a clear natural-language specification — do NOT write the code yourself.
-- To modify an existing code file, use modify_file (coder). Describe the required change as a specification — do NOT write the new code yourself.
-- Use replace_in_file (coder) only for small, literal text substitutions where no code generation is needed.
-- Use write_file (coder) only for non-code content such as plain-text files or config files.
+- To modify a specific section of an existing file, use patch_file (coder). Provide old_lines (the exact text to replace, copied verbatim from the file) and new_lines (the replacement). This is the primary tool for surgical edits to existing files.
+- To perform a larger modification of an existing code file that requires rewriting most of it, use modify_file (coder). Describe the required change as a specification — do NOT write the new code yourself.
+- Use replace_in_file (coder) only as a last resort for tiny literal substitutions when patch_file is not appropriate.
+- Use write_file (coder) only for creating new non-code content such as plain-text files or config files.
 - After every code_file or write_file action, always follow it with a file_exists action (verifier agent) to confirm the file was created. This is mandatory, not optional.
 - If a task requires running a Python file, follow the coder action with run_shell (verifier).
 - If the task produces an interactive or GUI Python app (e.g. pygame, tkinter, a game with a window), do NOT add a run_shell action to the plan. Static verification will be performed automatically by the verifier.
 - Use summarize_file when you need a concise understanding of a file instead of raw contents.
 - Use researcher for inspection tasks like listing files, searching in files, or reading existing files.
-- Never assign write_file, code_file, modify_file, or run_shell to researcher.
+- Never assign write_file, code_file, modify_file, patch_file, or run_shell to researcher.
 - success_criteria must be a non-empty JSON array of strings. Each string must be one concrete, testable condition. Good: "file foo.py exists", "python3 foo.py exits with code 0", "stdout contains 'hello world'". Bad: "task is completed", "works correctly". An empty array is not allowed.
 - Keep reasoning_summary short.
 - status should usually be "ready".
 - Produce the smallest viable action list."""
 
     _PERMISSIONS = """\
-- coder: code_file, modify_file, write_file, read_file, replace_in_file
+- coder: code_file, modify_file, patch_file, write_file, read_file, replace_in_file
 - verifier: run_shell, read_file, file_exists
 - researcher: read_file, list_files, search_in_files, file_exists, summarize_file"""
 
@@ -205,7 +206,7 @@ Malformed planner output:
     {"agent": "coder", "tool": "code_file", "args": {"path": "hello.py", "specification": "Print 'hello world' to stdout."}},
     {"agent": "verifier", "tool": "file_exists", "args": {"path": "hello.py"}},
     {"agent": "verifier", "tool": "run_shell", "args": {"command": "python3 hello.py"}},
-    {"agent": "coder", "tool": "modify_file", "args": {"path": "hello.py", "specification": "Change the greeting to say 'hello universe'."}}
+    {"agent": "coder", "tool": "patch_file", "args": {"path": "hello.py", "old_lines": "print('hello world')", "new_lines": "print('hello universe')"}}
   ]
 }"""
 
