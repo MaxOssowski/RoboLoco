@@ -241,7 +241,7 @@ class CoderFileMetadataTest(unittest.TestCase):
             agent="coder", tool="code_file",
             args={"path": "test_metadata_coder/new.py", "specification": "Print 1."},
         )
-        with patch.object(self.coder, "_call_ollama", return_value="print(1)"):
+        with patch.object(self.coder._llm, "generate", return_value="print(1)"):
             result = self.coder.execute(call, self.state)
         self.assertTrue(result.ok)
         self.assertEqual(result.data.get("kind"), "file_write")
@@ -251,7 +251,7 @@ class CoderFileMetadataTest(unittest.TestCase):
             agent="coder", tool="code_file",
             args={"path": "test_metadata_coder/new2.py", "specification": "Print 2."},
         )
-        with patch.object(self.coder, "_call_ollama", return_value="print(2)"):
+        with patch.object(self.coder._llm, "generate", return_value="print(2)"):
             result = self.coder.execute(call, self.state)
         self.assertTrue(result.ok)
         p = result.data.get("path", "")
@@ -264,7 +264,7 @@ class CoderFileMetadataTest(unittest.TestCase):
             agent="coder", tool="modify_file",
             args={"path": "test_metadata_coder/edit.py", "specification": "Change x to 2."},
         )
-        with patch.object(self.coder, "_call_ollama", return_value="x = 2\n"):
+        with patch.object(self.coder._llm, "generate", return_value="x = 2\n"):
             result = self.coder.execute(call, self.state)
         self.assertTrue(result.ok)
         self.assertEqual(result.data.get("kind"), "file_write")
@@ -274,7 +274,7 @@ class CoderFileMetadataTest(unittest.TestCase):
             agent="coder", tool="code_file",
             args={"path": "test_metadata_coder/logged.py", "specification": "Print 3."},
         )
-        with patch.object(self.coder, "_call_ollama", return_value="print(3)"):
+        with patch.object(self.coder._llm, "generate", return_value="print(3)"):
             self.coder.execute(call, self.state)
         events = [e for e in self.state.history if e["event_type"] == "tool_result"]
         self.assertEqual(len(events), 1)

@@ -47,6 +47,7 @@ import re
 from pathlib import Path
 
 _TEMPLATES_DIR = Path(__file__).parent
+_CACHE: dict[str, str] = {}
 
 
 def render_prompt(name: str, **kwargs: str) -> str:
@@ -74,11 +75,13 @@ def render_prompt(name: str, **kwargs: str) -> str:
     KeyError
         If the template references a ``{{placeholder}}`` with no matching kwarg.
     """
-    path = _TEMPLATES_DIR / name
-    if not path.is_file():
-        raise FileNotFoundError(f"Prompt template not found: {path}")
+    if name not in _CACHE:
+        path = _TEMPLATES_DIR / name
+        if not path.is_file():
+            raise FileNotFoundError(f"Prompt template not found: {path}")
+        _CACHE[name] = path.read_text(encoding="utf-8").strip()
 
-    template = path.read_text(encoding="utf-8").strip()
+    template = _CACHE[name]
 
     def _replace(match: re.Match) -> str:
         key = match.group(1)

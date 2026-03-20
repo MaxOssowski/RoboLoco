@@ -7,10 +7,10 @@ from typing import Any, Dict, List, Optional
 
 @dataclass
 class ModelConfig:
-    default: str = "llama3.1:8b"
+    default: str = "qwen2.5-coder:7b"
     planner: Optional[str] = None
     verifier: Optional[str] = None
-    coder: Optional[str] = "qwen3:8b"
+    coder: Optional[str] = None
     researcher: Optional[str] = None
 
     def for_agent(self, agent: str) -> str:

@@ -5,7 +5,6 @@ import argparse
 import itertools
 import json
 import os
-import subprocess
 import sys
 import threading
 import time
@@ -66,7 +65,7 @@ HELP_TEXT = f"""
 
 @dataclass
 class Settings:
-    default_model: str = "llama3.1:8b"
+    default_model: str = "qwen2.5-coder:7b"
     planner_model: str | None = None
     coder_model: str | None = None
     verifier_model: str | None = None
@@ -95,21 +94,9 @@ class Settings:
 
 
 def _fetch_ollama_models() -> list[str]:
-    """Return model names reported by ``ollama list``."""
-    try:
-        r = subprocess.run(
-            ["ollama", "list"], capture_output=True, text=True, timeout=10
-        )
-        if r.returncode != 0:
-            return []
-        models: list[str] = []
-        for line in r.stdout.strip().splitlines()[1:]:  # skip header row
-            parts = line.split()
-            if parts:
-                models.append(parts[0])
-        return models
-    except Exception:
-        return []
+    """Return model names available in the local Ollama instance."""
+    from orchestrator.llm import OllamaClient
+    return OllamaClient.list_models()
 
 
 # ── Options menu ──────────────────────────────────────────────────────────────
@@ -411,7 +398,7 @@ def run_task(orchestrator: Orchestrator, task: str, verbose: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="RoboLoco — interactive AI agent session")
-    parser.add_argument("--model",            default="llama3.1:8b", help="Default Ollama model for all agents")
+    parser.add_argument("--model",            default="qwen2.5-coder:7b", help="Default Ollama model for all agents")
     parser.add_argument("--planner-model",    default=None,          help="Ollama model for the planner agent")
     parser.add_argument("--verifier-model",   default=None,          help="Ollama model for the verifier agent")
     parser.add_argument("--coder-model",      default=None,          help="Ollama model for the coder agent")

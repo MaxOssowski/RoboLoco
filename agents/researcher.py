@@ -8,9 +8,8 @@ from orchestrator.state import TaskState, ToolCall, ToolResult
 class ResearcherAgent:
     name = "researcher"
 
-    def __init__(self, tool_registry: dict[str, object], model: str = "llama3.1:8b") -> None:
+    def __init__(self, tool_registry: dict[str, object]) -> None:
         self.tool_registry = tool_registry
-        self.model = model
 
     def can_execute(self, tool_name: str) -> bool:
         return tool_name in AGENT_PERMISSIONS[self.name]

@@ -29,7 +29,7 @@ class PlannerJsonRepairTests(unittest.TestCase):
 }
 """
 
-        with patch.object(self.planner, "_call_ollama", side_effect=[malformed, repaired]) as mocked_call:
+        with patch.object(self.planner._llm, "generate", side_effect=[malformed, repaired]) as mocked_call:
             plan = self.planner.act(
                 TaskState(goal="create example.py"),
                 self.orchestrator.tool_registry,
@@ -45,7 +45,7 @@ class PlannerJsonRepairTests(unittest.TestCase):
         still_bad = "still not json"
 
         # 1 initial call + 2 repair attempts (max_repair_attempts = 2)
-        with patch.object(self.planner, "_call_ollama", side_effect=[malformed, still_bad, still_bad]) as mocked_call:
+        with patch.object(self.planner._llm, "generate", side_effect=[malformed, still_bad, still_bad]) as mocked_call:
             plan = self.planner.act(
                 TaskState(goal="do something"),
                 self.orchestrator.tool_registry,
