@@ -16,15 +16,22 @@ class ShellTool:
         command = args.get("command", "")
         parts = validate_shell_command(command)
 
-        result = subprocess.run(
-            parts,
-            cwd=WORKSPACE,
-            capture_output=True,
-            text=True,
-            timeout=20,
-        )
+        try:
+            result = subprocess.run(
+                parts,
+                cwd=WORKSPACE,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        except subprocess.TimeoutExpired as exc:
+            partial = ((exc.stdout or "") + (exc.stderr or "")).strip()
+            msg = "Command timed out after 20 s."
+            if partial:
+                msg += f" Partial output: {partial}"
+            return ToolResult(ok=False, tool="run_shell", output=msg)
 
-        output = (result.stdout or "") + ("" + result.stderr if result.stderr else "")
+        output = (result.stdout or "") + (result.stderr or "")
         output = output.strip() or "<no output>"
 
         return ToolResult(

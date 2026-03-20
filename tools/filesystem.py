@@ -115,7 +115,7 @@ class SummarizeFileTool:
         preview_lines = args.get("preview_lines", 5)
 
         if not isinstance(preview_lines, int) or preview_lines < 0 or preview_lines > 20:
-            raise ValidationError("preview_lines must be an integer between 0 and 20.")
+            return ToolResult(ok=False, tool="summarize_file", output="preview_lines must be an integer between 0 and 20.")
 
         file_path = resolve_workspace_path(path)
         rel = file_path.relative_to(WORKSPACE)
