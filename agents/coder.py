@@ -12,6 +12,7 @@ from __future__ import annotations
 #              and relevant file context, produces code, then persists it via
 #              the existing filesystem tools.
 
+import ast
 import re
 import subprocess
 
@@ -79,6 +80,48 @@ class CoderAgent:
         # 4. No fences — return whatever remains after reasoning removal.
         return text
 
+    @staticmethod
+    def _check_python_syntax(path: str, content: str) -> str | None:
+        """Return a description of the SyntaxError if *content* is invalid Python, else None.
+
+        Only checked for ``.py`` files; other file types are always considered valid.
+        """
+        if not path.endswith(".py"):
+            return None
+        try:
+            ast.parse(content)
+            return None
+        except SyntaxError as exc:
+            return f"line {exc.lineno}: {exc.msg}"
+
+    def _generate_code(self, prompt: str, path: str) -> str:
+        """Call the LLM, extract code, and retry once when Python syntax is invalid.
+
+        On the retry attempt the syntax error is appended to the prompt so the
+        model can self-correct.  If the second attempt also produces invalid
+        syntax the content is still returned — the verifier will surface the
+        error with a clear message.
+        """
+        feedback = ""
+        for _ in range(2):
+            effective_prompt = (
+                prompt if not feedback
+                else (
+                    f"{prompt}\n\n"
+                    f"The previous response contained a Python syntax error: {feedback}\n"
+                    "Fix the indentation and syntax issues. Return ONLY valid Python code."
+                )
+            )
+            raw = self._call_ollama(effective_prompt)
+            content = self._extract_code(raw)
+            if not content:
+                raise ValueError("LLM returned empty code content")
+            syntax_err = self._check_python_syntax(path, content)
+            if syntax_err is None:
+                return content
+            feedback = syntax_err
+        return content  # return best effort; verifier will catch remaining issues
+
     # ── Prompt builders ───────────────────────────────────────────────────────
 
     def _build_create_prompt(self, path: str, specification: str, state: TaskState) -> str:
@@ -116,11 +159,10 @@ Current file content:
 
         prompt = self._build_create_prompt(path, specification, state)
         try:
-            raw = self._call_ollama(prompt)
+            content = self._generate_code(prompt, path)
         except Exception as exc:
             return ToolResult(ok=False, tool="code_file", output=f"LLM generation failed: {exc}")
 
-        content = self._extract_code(raw)
         if not content:
             return ToolResult(ok=False, tool="code_file", output="LLM returned empty code content")
 
@@ -156,11 +198,10 @@ Current file content:
 
         prompt = self._build_modify_prompt(path, read_result.output, specification, state)
         try:
-            raw = self._call_ollama(prompt)
+            content = self._generate_code(prompt, path)
         except Exception as exc:
             return ToolResult(ok=False, tool="modify_file", output=f"LLM generation failed: {exc}")
 
-        content = self._extract_code(raw)
         if not content:
             return ToolResult(ok=False, tool="modify_file", output="LLM returned empty code content")
 
