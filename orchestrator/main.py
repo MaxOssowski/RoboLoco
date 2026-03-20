@@ -65,7 +65,7 @@ class Orchestrator:
             tool_registry=self.tool_registry,
             strict_verifier=strict_verifier,
         )
-        self.researcher = ResearcherAgent(self.tool_registry, model=models.for_agent("researcher"))
+        self.researcher = ResearcherAgent(self.tool_registry)
         self.router = Router(self.coder, self.verifier, self.researcher)
 
     def _agent_models(self) -> dict:
@@ -73,7 +73,7 @@ class Orchestrator:
             "planner": self.planner.model,
             "coder": self.coder.model,
             "verifier": self.verifier.model,
-            "researcher": self.researcher.model,
+            "researcher": "n/a",
         }
 
     def _build_summary(

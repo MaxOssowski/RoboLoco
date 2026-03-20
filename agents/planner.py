@@ -1,13 +1,11 @@
-
 from __future__ import annotations
 
 import json
-import re
-import subprocess
 from typing import Any, Dict, List
 
 from memory.summary_store import load_recent_summaries
-from orchestrator.policies import AGENT_PERMISSIONS, WORKSPACE, ValidationError
+from orchestrator.llm import OllamaClient
+from orchestrator.policies import AGENT_PERMISSIONS, ValidationError
 from orchestrator.state import AgentResult, TaskState, ToolCall
 from prompts.loader import render_prompt
 
@@ -16,30 +14,14 @@ class PlannerAgent:
     name = "planner"
     max_repair_attempts = 2
 
-    def __init__(self, model: str = "llama3.1:8b", timeout: int = 60) -> None:
+    def __init__(self, model: str = "qwen2.5-coder:7b", timeout: int = 60) -> None:
         self.model = model
-        self.timeout = timeout
+        self._llm = OllamaClient(model=model, timeout=timeout)
 
-    def _call_ollama(self, prompt: str) -> str:
-        result = subprocess.run(
-            ["ollama", "run", self.model, prompt],
-            cwd=WORKSPACE,
-            capture_output=True,
-            text=True,
-            timeout=self.timeout,
-        )
-        if result.returncode != 0:
-            raise RuntimeError((result.stderr or result.stdout or "Ollama call failed").strip())
-        return (result.stdout or "").strip()
-
-    # Matches <think>...</think> reasoning blocks emitted by thinking models.
-    _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+    # ── JSON extraction ───────────────────────────────────────────────────────
 
     def _extract_json(self, text: str) -> Dict[str, Any]:
-        # Remove reasoning blocks before attempting to parse JSON.
-        text = self._THINK_RE.sub("", text)
-        text = re.sub(r"</think>", "", text)
-        text = text.strip()
+        text = self._llm.strip_thinking(text)
 
         try:
             return json.loads(text)
@@ -56,17 +38,15 @@ class PlannerAgent:
         start = text.find("{")
         end = text.rfind("}")
         if start != -1 and end != -1 and end > start:
-            candidate = text[start:end + 1]
-            return json.loads(candidate)
+            return json.loads(text[start:end + 1])
 
         raise ValidationError("Planner did not return valid JSON.")
 
     def _build_json_repair_prompt(self, malformed_output: str) -> str:
-        # Template: prompts/planner_json_repair.md
         return render_prompt("planner_json_repair.md", malformed_output=malformed_output)
 
     def _get_plan_data(self, prompt: str) -> Dict[str, Any]:
-        raw = self._call_ollama(prompt)
+        raw = self._llm.generate(prompt)
 
         try:
             return self._extract_json(raw)
@@ -76,13 +56,17 @@ class PlannerAgent:
 
             for _ in range(self.max_repair_attempts):
                 repair_prompt = self._build_json_repair_prompt(repair_raw)
-                repair_raw = self._call_ollama(repair_prompt)
+                repair_raw = self._llm.generate(repair_prompt)
                 try:
                     return self._extract_json(repair_raw)
                 except Exception as exc:
                     repair_error = exc
 
-            raise ValidationError(f"Planner JSON repair failed: {repair_error}") from repair_error
+            raise ValidationError(
+                f"Planner JSON repair failed: {repair_error}"
+            ) from repair_error
+
+    # ── Plan validation ───────────────────────────────────────────────────────
 
     def _validate_plan(self, data: Dict[str, Any], tool_registry: Dict[str, object]) -> AgentResult:
         if not isinstance(data, dict):
@@ -135,7 +119,6 @@ class PlannerAgent:
 
             actions.append(ToolCall(agent=agent, tool=tool, args=args))
 
-        # success_criteria is required and must be a non-empty list of non-empty strings
         sc_raw = data.get("success_criteria")
         if not isinstance(sc_raw, list):
             raise ValidationError(
@@ -148,9 +131,7 @@ class PlannerAgent:
                 "Provide at least one concrete, testable condition."
             )
         if not all(isinstance(c, str) and c.strip() for c in sc_raw):
-            raise ValidationError(
-                "Every success criterion must be a non-empty string."
-            )
+            raise ValidationError("Every success criterion must be a non-empty string.")
         success_criteria = [c.strip() for c in sc_raw]
 
         return AgentResult(
@@ -160,6 +141,8 @@ class PlannerAgent:
             status=status,
             success_criteria=success_criteria,
         )
+
+    # ── Prompt builders ───────────────────────────────────────────────────────
 
     def _build_memory_text(self) -> str:
         recent = load_recent_summaries(limit=3)
@@ -177,24 +160,18 @@ class PlannerAgent:
         return "\n" + "\n".join(lines) + "\n"
 
     _RULES = """\
-- All paths must be relative.
+- All file paths must be relative.
 - Prefer python3 over python.
-- Do not use shell chaining, pipes, redirects, or multiple commands.
-- To create a new code file, use code_file (coder). Provide a clear natural-language specification — do NOT write the code yourself.
-- To modify a specific section of an existing file, use patch_file (coder). Provide old_lines (the exact text to replace, copied verbatim from the file) and new_lines (the replacement). This is the primary tool for surgical edits to existing files. old_lines must not be empty. Do NOT write code in new_lines — new_lines should be a short literal replacement, not a full implementation. Do NOT use patch_file on a file that has not been created yet in the same plan.
-- To perform a larger modification of an existing code file that requires rewriting most of it, use modify_file (coder). Describe the required change as a specification — do NOT write the new code yourself.
-- Use replace_in_file (coder) only as a last resort for tiny literal substitutions when patch_file is not appropriate.
-- Use write_file (coder) only for creating new non-code content such as plain-text files or config files.
-- After every code_file or write_file action, always follow it with a file_exists action (verifier agent) to confirm the file was created. This is mandatory, not optional.
-- If a task requires running a Python file, follow the coder action with run_shell (verifier).
-- If the task produces an interactive or GUI Python app (e.g. pygame, tkinter, a game with a window), do NOT add a run_shell action to the plan. Static verification will be performed automatically by the verifier.
-- Use summarize_file when you need a concise understanding of a file instead of raw contents.
-- Use researcher for inspection tasks like listing files, searching in files, or reading existing files.
-- Never assign write_file, code_file, modify_file, patch_file, or run_shell to researcher.
-- success_criteria must be a non-empty JSON array of strings. Each string must be one concrete, testable condition. Good: "file foo.py exists", "python3 foo.py exits with code 0", "stdout contains 'hello world'". Bad: "task is completed", "works correctly". An empty array is not allowed.
-- Keep reasoning_summary short.
-- status should usually be "ready".
-- Produce the smallest viable action list."""
+- No shell chaining, pipes, redirects, or multiple commands in one run_shell.
+- To create a new code file use code_file (coder) with a natural-language specification. Do NOT write the code yourself.
+- To rewrite most of an existing file use modify_file (coder) with a natural-language specification. Do NOT write the code yourself.
+- To replace a small section of an existing file use patch_file (coder). old_lines must be the exact text to replace (non-empty, copied verbatim). new_lines is the replacement. Do NOT embed full implementations in new_lines.
+- Use write_file (coder) only for non-code content (plain text, configs).
+- After every code_file or write_file, add a file_exists action (verifier) to confirm creation.
+- If the task requires running a Python file, add run_shell (verifier) after the coder action.
+- If the task produces an interactive or GUI app (pygame, tkinter, etc.), do NOT add run_shell. Static verification is automatic.
+- success_criteria: non-empty JSON array of concrete testable strings. E.g. "file foo.py exists", "python3 foo.py exits with code 0".
+- Keep reasoning_summary to one line. status is usually "ready". Use the smallest viable action list."""
 
     _PERMISSIONS = """\
 - coder: code_file, modify_file, patch_file, write_file, read_file, replace_in_file
@@ -218,7 +195,6 @@ class PlannerAgent:
 }"""
 
     def _build_prompt(self, state: TaskState) -> str:
-        # Template: prompts/planner_plan.md
         return render_prompt(
             "planner_plan.md",
             permissions=self._PERMISSIONS,
@@ -229,16 +205,15 @@ class PlannerAgent:
         )
 
     def _build_repair_prompt(self, state: TaskState, diagnostic: dict) -> str:
-        # Template: prompts/planner_repair.md
         attempt = diagnostic["attempt"]
         sc_raw = diagnostic.get("success_criteria", [])
-        # Handle both list (new) and string (legacy) shapes gracefully
         if isinstance(sc_raw, list) and sc_raw:
             criteria_text = "\n".join(f"  - {c}" for c in sc_raw)
         elif isinstance(sc_raw, str) and sc_raw:
             criteria_text = f"  - {sc_raw}"
         else:
             criteria_text = "  (none specified)"
+
         verification_reasoning = diagnostic.get("verification_reasoning", "")
         failed_fp = diagnostic.get("failed_fingerprint")
         is_repeated = diagnostic.get("is_repeated_failure", False)
@@ -285,12 +260,15 @@ class PlannerAgent:
             schema=self._SCHEMA,
         )
 
+    # ── Entry point ───────────────────────────────────────────────────────────
+
     def act(self, state: TaskState, tool_registry: Dict[str, object]) -> AgentResult:
         repair_events = [e for e in state.history if e["event_type"] == "repair_diagnostic"]
-        if repair_events:
-            prompt = self._build_repair_prompt(state, repair_events[-1]["payload"])
-        else:
-            prompt = self._build_prompt(state)
+        prompt = (
+            self._build_repair_prompt(state, repair_events[-1]["payload"])
+            if repair_events
+            else self._build_prompt(state)
+        )
 
         try:
             data = self._get_plan_data(prompt)

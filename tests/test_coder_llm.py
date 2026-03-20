@@ -39,7 +39,7 @@ class CoderLLMTests(unittest.TestCase):
                 "specification": "Print 'hello world' to stdout.",
             },
         )
-        with patch.object(self.coder, "_call_ollama", return_value="print('hello world')"):
+        with patch.object(self.coder._llm, "generate", return_value="print('hello world')"):
             result = self.coder.execute(call, self.state)
 
         self.assertTrue(result.ok)
@@ -101,7 +101,7 @@ class CoderLLMTests(unittest.TestCase):
             tool="code_file",
             args={"path": "test_coder_llm/think.py", "specification": "Print hello world."},
         )
-        with patch.object(self.coder, "_call_ollama", return_value=llm_response):
+        with patch.object(self.coder._llm, "generate", return_value=llm_response):
             result = self.coder.execute(call, self.state)
 
         self.assertTrue(result.ok)
@@ -117,7 +117,7 @@ class CoderLLMTests(unittest.TestCase):
             tool="code_file",
             args={"path": "test_coder_llm/fenced.py", "specification": "Print hello."},
         )
-        with patch.object(self.coder, "_call_ollama", return_value=llm_response):
+        with patch.object(self.coder._llm, "generate", return_value=llm_response):
             result = self.coder.execute(call, self.state)
 
         self.assertTrue(result.ok)
@@ -131,7 +131,7 @@ class CoderLLMTests(unittest.TestCase):
             tool="code_file",
             args={"path": "test_coder_llm/fail.py", "specification": "Something."},
         )
-        with patch.object(self.coder, "_call_ollama", side_effect=RuntimeError("ollama crashed")):
+        with patch.object(self.coder._llm, "generate", side_effect=RuntimeError("ollama crashed")):
             result = self.coder.execute(call, self.state)
 
         self.assertFalse(result.ok)
@@ -144,7 +144,7 @@ class CoderLLMTests(unittest.TestCase):
             tool="code_file",
             args={"path": "test_coder_llm/empty.py", "specification": "Something."},
         )
-        with patch.object(self.coder, "_call_ollama", return_value=""):
+        with patch.object(self.coder._llm, "generate", return_value=""):
             result = self.coder.execute(call, self.state)
 
         self.assertFalse(result.ok)
@@ -180,7 +180,7 @@ class CoderLLMTests(unittest.TestCase):
                 "specification": "Change the greeting to 'hi there'.",
             },
         )
-        with patch.object(self.coder, "_call_ollama", return_value="print('hi there')\n"):
+        with patch.object(self.coder._llm, "generate", return_value="print('hi there')\n"):
             result = self.coder.execute(call, self.state)
 
         self.assertTrue(result.ok)
@@ -210,7 +210,7 @@ class CoderLLMTests(unittest.TestCase):
             tool="modify_file",
             args={"path": "test_coder_llm/target.py", "specification": "Rename x to y."},
         )
-        with patch.object(self.coder, "_call_ollama", side_effect=RuntimeError("timeout")):
+        with patch.object(self.coder._llm, "generate", side_effect=RuntimeError("timeout")):
             result = self.coder.execute(call, self.state)
 
         self.assertFalse(result.ok)
@@ -224,7 +224,7 @@ class CoderLLMTests(unittest.TestCase):
             tool="code_file",
             args={"path": "test_coder_llm/logged.py", "specification": "Print 42."},
         )
-        with patch.object(self.coder, "_call_ollama", return_value="print(42)"):
+        with patch.object(self.coder._llm, "generate", return_value="print(42)"):
             self.coder.execute(call, self.state)
 
         tool_events = [e for e in self.state.history if e["event_type"] == "tool_result"]
