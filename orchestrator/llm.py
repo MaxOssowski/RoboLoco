@@ -37,9 +37,16 @@ class OllamaClient:
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 return json.loads(resp.read()).get("response", "").strip()
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode(errors="replace").strip()
+            raise RuntimeError(
+                f"Ollama returned HTTP {exc.code} for model '{self.model}'. "
+                f"Is the model installed? Run: ollama pull {self.model}"
+                + (f"\nServer message: {body}" if body else "")
+            ) from exc
         except urllib.error.URLError as exc:
             raise RuntimeError(
-                f"Ollama not reachable at {_BASE_URL} — is it running? ({exc})"
+                f"Ollama not reachable at {_BASE_URL} — is it running? ({exc.reason})"
             ) from exc
 
     def strip_thinking(self, text: str) -> str:

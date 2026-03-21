@@ -12,7 +12,7 @@ def save_task_summary(summary: dict) -> None:
     SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)
 
     ts = summary.get("timestamp", datetime.now(timezone.utc).isoformat())
-    safe_ts = ts[:19].replace(":", "-").replace("T", "T")
+    safe_ts = ts[:19].replace(":", "-").replace("T", "_")
     filename = f"{safe_ts}_{uuid.uuid4().hex[:8]}.json"
 
     encoded = json.dumps(summary, indent=2)
