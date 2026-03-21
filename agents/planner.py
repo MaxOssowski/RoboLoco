@@ -169,6 +169,7 @@ class PlannerAgent:
 - Use write_file (coder) only for non-code content (plain text, configs).
 - After every code_file or write_file, add a file_exists action (verifier) to confirm creation.
 - If the task requires running a Python file, add run_shell (verifier) after the coder action.
+- If the script uses input() to read from the user, run_shell MUST include a "stdin" key with newline-separated test values (e.g. "stdin": "5\n3\n+\n"). Without stdin the script will hang and timeout.
 - If the task produces an interactive or GUI app (pygame, tkinter, etc.), do NOT add run_shell. Static verification is automatic.
 - success_criteria: non-empty JSON array of concrete testable strings. E.g. "file foo.py exists", "python3 foo.py exits with code 0".
 - Keep reasoning_summary to one line. status is usually "ready". Use the smallest viable action list."""
@@ -189,7 +190,7 @@ class PlannerAgent:
   "actions": [
     {"agent": "coder", "tool": "code_file", "args": {"path": "<target>.py", "specification": "<natural-language description of what the file must do>"}},
     {"agent": "verifier", "tool": "file_exists", "args": {"path": "<target>.py"}},
-    {"agent": "verifier", "tool": "run_shell", "args": {"command": "python3 <target>.py"}},
+    {"agent": "verifier", "tool": "run_shell", "args": {"command": "python3 <target>.py", "stdin": "<newline-separated test input if script uses input(), else omit>"}},
     {"agent": "coder", "tool": "patch_file", "args": {"path": "<target>.py", "old_lines": "<exact existing text to replace>", "new_lines": "<replacement text>"}}
   ]
 }"""

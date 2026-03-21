@@ -14,6 +14,7 @@ class ShellTool:
     @staticmethod
     def run(args: Dict[str, Any]) -> ToolResult:
         command = args.get("command", "")
+        stdin_text: str | None = args.get("stdin")
         parts = validate_shell_command(command)
 
         try:
@@ -23,6 +24,8 @@ class ShellTool:
                 capture_output=True,
                 text=True,
                 timeout=20,
+                input=stdin_text,          # None → DEVNULL-equivalent (no stdin pipe)
+                stdin=subprocess.DEVNULL if stdin_text is None else None,
             )
         except subprocess.TimeoutExpired as exc:
             partial = ((exc.stdout or "") + (exc.stderr or "")).strip()
